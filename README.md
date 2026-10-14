@@ -1,60 +1,124 @@
 # Olist E-Commerce Analysis | MySQL & Tableau
 
-A portfolio project exploring the Brazilian E-Commerce Public Dataset by Olist through MySQL analysis and four Tableau dashboards. The analysis covers sales, customers, products, fulfillment, reviews, payments, sellers, and regional performance.
+## 1. Project overview
 
-## Business questions
+An end-to-end portfolio project analyzing sales, customer behavior, and operational performance in the Brazilian E-Commerce Public Dataset by Olist. MySQL queries explore the marketplace from order-level transactions through delivery outcomes, customer reviews, and seller performance. Four Tableau dashboards bring the findings together for business review.
 
-- Which categories and regions contribute most to sales?
-- What distinguishes one-time and repeat customers?
-- How do delivery outcomes relate to customer satisfaction?
-- What payment and seller patterns appear in the data?
-- Which regional and operational risks warrant closer investigation?
+The objective is to identify where sales originate, how delivery reliability relates to customer experience, and which customer, regional, and seller patterns warrant further attention.
 
-## Project files
+## 2. Tools and techniques
 
-| Folder | Contents |
+| Tool | Use |
 | --- | --- |
-| `sql/setup/` | Original CSV import statements, with duplicate/broken order-import attempt omitted |
-| `sql/validation/` | Original row-count, relationship and coverage checks |
-| `sql/analysis/` | Eleven focused analysis scripts |
-| `sql/views/` | All fourteen original dashboard views, arranged in creation order |
-| `docs/` | Curation decisions, query provenance, original metric definitions, suggested corrections |
-| `dashboards/` | Dashboard structure and instructions for adding published work |
+| MySQL 8.0+ | Data imports, validation, joins, CTEs, window functions, aggregations, and analytical views |
+| MySQL Workbench | Query execution, result inspection, and data export |
+| Tableau | Four dashboards covering commercial performance, customer experience, operational risk, and customer behavior |
 
-## Dataset and tools
+## 3. Dataset
 
-Dataset: [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce).
+**Source:** [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
 
-Tools: MySQL 8.0+ and Tableau. The dataset contains multiple grains, including orders, items, payments, and review rows. Raw CSV files are not included in this repository.
+The project covers orders placed during **2016–2018**, with **99,441 orders**, **112,650 order items**, and **96,096 distinct customers**. Monetary values are historical **Brazilian reais (BRL / R$)**.
 
-## Using the SQL
+The nine source tables cover orders, customers, order items, payments, reviews, products, sellers, geolocation, and product-category translations. Orders can contain multiple items, payments, sellers, and review records, so identifying the grain of each table is essential before joining them.
 
-1. Use the existing MySQL database from this project, containing the nine Olist source tables. The SQL files do not include CREATE TABLE statements. The review table must have the existing `review_row_id` column used by the original views.
-2. If rebuilding from CSVs, create suitable source tables first. Edit the Windows CSV paths in `sql/setup/01_import_data.sql` and review newline settings and LOCAL INFILE configuration. Import each file only once. This is the original import workflow, not a newly verified installation script.
-3. Select your project database as the active schema in Workbench; no database name is hardcoded in the analysis/view scripts.
-4. Run `sql/validation/01_data_validation.sql` and inspect the outputs.
-5. Run the view files in numeric order. The seller view is created before `vw_kpis`, which references it.
-6. Run any analysis script after the data has been loaded. The analysis scripts are independent of the views.
-7. Export relevant view results to Tableau or connect Tableau to MySQL.
+Raw CSV files are not included. Download them from the original dataset source.
 
+## 4. Business questions
 
-## Tableau presentation
+- How do sales change over time, and which categories and states contribute most?
+- How often do customers return, and how does repeat-customer value compare with one-time purchasing?
+- Which fulfillment stages account for delivery time, and where are delays most common?
+- How do delivery delays relate to review scores and negative feedback?
+- Which regions and sellers show performance risks?
+- How do payment methods and installment patterns vary across orders?
+- What recurring complaint themes appear in review comments?
 
-1. Executive Sales Overview
-2. Customer Experience & Delivery
-3. Regional & Seller Risk
-4. Customer Behavior & Insights
+## 5. Dashboard previews
 
-## Dashboard Previews
+Explore the [dashboard PDF](dashboards/Olist_Ecommerce_Analysis.pdf) or download the [packaged Tableau workbook](dashboards/Olist_Ecommerce_Analysis.twbx) to open in compatible Tableau software.
 
 ### 01 — Executive Sales Overview
+
+Revenue, orders, average order value, and unique customers, supported by monthly revenue trends and category/state comparisons.
+
 ![Executive Sales Overview](dashboards/01.Executive_Sales_Overview.png)
 
 ### 02 — Customer Experience & Delivery
+
+Fulfillment and delivery performance, customer satisfaction, and the relationship between delay severity and review scores.
+
 ![Customer Experience and Delivery](dashboards/02.Customer_Experience_&_Delivery.png)
 
 ### 03 — Regional & Seller Risk
+
+Geographic performance and seller risk indicators to help prioritize operational investigation.
+
 ![Regional and Seller Risk](dashboards/03.Regional_&_Seller_Risk.png)
 
 ### 04 — Customer Behavior & Insights
+
+Repeat purchasing, customer segments, cohort retention, and payment-method usage.
+
 ![Customer Behavior and Insights](dashboards/04.Customer_Behavior.png)
+
+## 6. Key findings
+
+| Finding | Business interpretation |
+| --- | --- |
+| Dashboard sales value totals **R$15.84 million**, with **99,441 orders** and **R$160.58 average order value**. | Establishes the marketplace's commercial baseline. Sales value includes freight; AOV covers orders with item value. |
+| Only **2,997 customers (3.12%)** placed more than one order during the observation period. | Repeat purchasing is limited within the available history. |
+| Repeat customers contribute **5.82% of sales value**, averaging **R$307.66 per customer**, compared with **R$160.28** for one-time customers. | Returning customers account for a greater share of value than their share of customers. |
+| Average delivery time is **12.62 days** across **95,082 chronologically valid delivered orders**. | Provides a baseline for monitoring fulfillment and logistics performance. |
+| Earlier validated delivery/review comparisons show average scores of approximately **4.29 for on-time/early orders** and **2.57 for late orders**. | Delivery delays are associated with a substantial deterioration in customer satisfaction. Exact results depend on the review and lateness convention used. |
+| Credit cards are used on approximately **76.94%** of paid orders, followed by boleto at **19.90%**. | Credit cards dominate payment usage. Orders can use multiple methods, so usage percentages are not mutually exclusive. |
+
+These findings use the project's dashboard definitions and validated analysis results. Supporting exploratory queries sometimes use different populations or calculations; see [metric definitions](docs/metric_definitions.md) before comparing results across scripts.
+
+## 7. Recommendations
+
+| Priority | Suggested action | Measures to monitor |
+| --- | --- | --- |
+| Delivery reliability | Investigate delayed routes and fulfillment stages; prioritize regions with both material order volume and poor delivery performance. | Late-delivery rate, delivery time, approval/dispatch/shipping duration |
+| Seller performance | Use seller scorecards to flag sellers for investigation and targeted operational support. | Dispatch time, late-delivery rate, review score, negative-review rate |
+| Customer retention | Test post-purchase follow-ups and relevant repeat-purchase campaigns, then evaluate whether they increase return purchasing. | Repeat-customer rate, cohort retention, repeat-customer sales share |
+| Product and service quality | Review complaint themes alongside category and seller results to investigate recurring problems. | Negative-review rate, complaint-theme frequency, order volume |
+
+These are proposed actions based on historical patterns; their business impact has not been measured in this project.
+
+## 8. Repository structure
+
+| Path | Contents |
+| --- | --- |
+| [sql/01.setup/](sql/01.setup/) | Original CSV import statements; source tables must already exist |
+| [sql/02.analysis/](sql/02.analysis/) | Eleven scripts covering sales, customers, cohorts, categories, delivery, satisfaction, payments, sellers, regions, review themes, and cross-dimensional insights |
+| [sql/03.validation/](sql/03.validation/) | Row-count, relationship, and data-coverage checks |
+| [sql/04.views/](sql/04.views/) | Four ordered scripts defining the fourteen Tableau analytical views |
+| [docs/metric_definitions.md](docs/metric_definitions.md) | Calculation definitions, population differences, and interpretation caveats |
+| [dashboards/](dashboards/) | Four dashboard images, a PDF export, and the packaged Tableau workbook |
+
+## 9. How to reproduce
+
+1. **Download the data** from the linked Olist dataset and extract the CSV files.
+2. **Prepare MySQL 8.0+** and select a project database in MySQL Workbench. The repository contains import statements, but does **not** currently include the `CREATE TABLE` schema. Rebuilding therefore requires creating the nine source tables first, including the `review_row_id` surrogate column used by review-ranking views.
+3. **Import the CSVs** using [01_import_data.sql](sql/01.setup/01_import_data.sql). Replace the local Windows paths, check CSV newline settings, and configure `LOCAL INFILE` as needed. Import each source file once and inspect import warnings.
+4. **Validate the data** using [01_data_validation.sql](sql/03.validation/01_data_validation.sql). Review counts, missing relationships, and coverage before analyzing results.
+5. **Explore the analysis scripts** in `sql/02.analysis/`. These operate on the source tables and can be run independently of the dashboard views.
+6. **Create the dashboard views** by running the four files in `sql/04.views/` in numeric order. The seller-performance view must exist before `vw_kpis` is created.
+7. **Open the Tableau workbook** to inspect the presentation. To rebuild or refresh it, connect Tableau to the MySQL views or export view results and update the workbook's data sources as required.
+
+The import SQL preserves the original workflow and is not a complete automated installation. A local MySQL setup is required to rerun the SQL; the PDF provides a static view of the dashboards.
+
+## 10. Methodology and limitations
+
+- **Sales definition:** Final dashboard revenue is `SUM(price + freight_value)` across all order statuses. It represents item sales value plus freight, rather than profit or Olist's own platform revenue. Supporting sales queries may use item price alone or restrict statuses. AOV averages non-null order-level item-plus-freight values, so its denominator differs from the total order count.
+- **Customer identity:** Customer-level retention and segmentation use `customer_unique_id`. The category sales view retains `customer_id`, which represents an order-specific customer record; its customer counts should not be interpreted as distinct people across purchases.
+- **Join grain:** One-to-many relationships require aggregation or deduplication before combining measures. Orders spanning multiple categories or sellers can appear in multiple groups; group-level distinct counts are not additive.
+- **Delivery population:** Final delivery KPIs require complete timestamps in chronological order. This yields 95,082 valid delivered orders. Review and seller views may use broader populations. Timestamp-based lateness and calendar-day `DATEDIFF` buckets can classify boundary cases differently.
+- **Review handling:** KPI, state, review, and seller dashboard views select the latest review answer per order, using descending `review_row_id` as a tie-breaker. Delay and other impact views average review scores per order. Supporting queries may retain original review rows. Negative reviews generally mean scores 1–2, neutral 3, and positive 4–5.
+- **Risk screening:** Seller-risk segments use comparisons against seller averages. They are investigation heuristics, not validated predictive models or proof of seller responsibility.
+- **Retention window:** Repeat purchasing and cohorts describe activity observed in this dataset. Later cohorts have shorter follow-up periods; unobserved future months must not be treated as zero retention. Endpoint months also have limited sales coverage.
+- **Payment and text analysis:** Payment-method usage can total more than 100% because orders can use several methods. Review-comment themes use overlapping Portuguese keyword/regex rules and are not validated sentiment analysis.
+- **Interpretation:** Findings describe historical associations. They do not establish that delays, sellers, payment choices, or categories caused the observed review outcomes.
+
+See [metric_definitions.md](docs/metric_definitions.md) for the detailed differences preserved in the original SQL.
