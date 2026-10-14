@@ -2,8 +2,6 @@
 
 A portfolio project exploring the Brazilian E-Commerce Public Dataset by Olist through MySQL analysis and four Tableau dashboards. The analysis covers sales, customers, products, fulfillment, reviews, payments, sellers, and regional performance.
 
-This edition preserves the SQL submitted during the analysis. Curation removes repeated, intermediate, and low-value statements, organizes files, and adds documentation. **Retained SQL logic is unchanged.** Suggested corrections are documented separately and have not been applied.
-
 ## Business questions
 
 - Which categories and regions contribute most to sales?
@@ -39,7 +37,6 @@ Tools: MySQL 8.0+ and Tableau. The dataset contains multiple grains, including o
 6. Run any analysis script after the data has been loaded. The analysis scripts are independent of the views.
 7. Export relevant view results to Tableau or connect Tableau to MySQL.
 
-Read `docs/metric_definitions.md` before comparing results across scripts: the original analysis uses different revenue, status, delivery, review, and seller-risk definitions in different places. They have deliberately not been standardized in this edition.
 
 ## Tableau presentation
 
@@ -48,10 +45,16 @@ Read `docs/metric_definitions.md` before comparing results across scripts: the o
 3. Regional & Seller Risk
 4. Customer Behavior & Insights
 
-Add your final screenshots and Tableau Public link as described in `dashboards/README.md`.
+## Dashboard Previews
 
-## Curation and verification
+### 01 — Executive Sales Overview
+![Executive Sales Overview](dashboards/01.Executive_Sales_Overview.png)
 
-All **90 retained statements** were compared to the uploaded SQL and confirmed unchanged apart from surrounding whitespace and terminal semicolon normalization. A provenance document maps every statement to its original file. No new analytical queries, schema SQL, Python importer, or replacement KPI figures are included.
+### 02 — Customer Experience & Delivery
+![Customer Experience and Delivery](dashboards/02.Customer_Experience_&_Delivery.png)
 
-This verification checks preservation of the submitted SQL. It does not establish that every retained query is statistically correct or newly tested in native MySQL. See `docs/suggested_corrections.md` for issues to review separately.
+### 03 — Regional & Seller Risk
+![Regional and Seller Risk](dashboards/03.Regional_&_Seller_Risk.png)
+
+### 04 — Customer Behavior & Insights
+![Customer Behavior and Insights](dashboards/04.Customer_Behavior.png)
