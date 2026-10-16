@@ -1,6 +1,9 @@
 -- Customer mix, spend bands, repeat purchase value and purchase intervals.
 
 -- One-time vs repeat customers
+
+-- Identify people with customer_unique_id; customer_id identifies an order's customer record.
+-- This first comparison includes all order statuses.
 SELECT
     CASE
         WHEN order_count = 1 THEN 'One-time'
@@ -19,6 +22,8 @@ FROM (
 GROUP BY customer_type;
 
 -- Customer revenue distribution
+-- Question: How is delivered-order spending distributed across customers?
+-- Spending includes item price plus freight; customers without delivered items are excluded.
 
 SELECT
 	CASE
@@ -54,6 +59,8 @@ ORDER BY
     END;
 
 -- One-time vs repeat customers comparison
+-- Question: How do spending and order frequency differ between customer groups?
+-- Here the group definition uses delivered orders only, unlike the first query.
 
 WITH customer_summary AS (
 	SELECT
@@ -81,6 +88,7 @@ FROM customer_summary
 GROUP BY customer_type;
 
 -- Revenue contribution
+-- Question: What share of delivered item-plus-freight revenue comes from each group?
 
 WITH customer_summary AS (
 	SELECT
@@ -117,6 +125,9 @@ SELECT
 FROM customer_group;
 
 -- Summarizing repeat-purchase intervals
+-- LAG compares consecutive delivered purchases for each person.
+-- Each interval is one observation; frequent buyers can contribute multiple intervals.
+-- DATEDIFF measures calendar-day differences.
 
 WITH customer_orders AS (
     SELECT
@@ -149,6 +160,8 @@ SELECT
 FROM purchase_intervals;
 
 -- first-to-second purchase behavior
+-- Question: How long do returning customers take to place their second delivered order?
+-- Customers without a second delivered order are excluded from these averages.
 
 WITH customer_orders AS (
     SELECT
@@ -194,6 +207,8 @@ SELECT
 FROM first_second
 WHERE second_order IS NOT NULL;
 
+-- Question: What share of buyers at purchase N reaches purchase N+1?
+-- Uses delivered purchases; the inner join omits stages with no following stage.
 WITH customer_orders AS (
     SELECT
         c.customer_unique_id,

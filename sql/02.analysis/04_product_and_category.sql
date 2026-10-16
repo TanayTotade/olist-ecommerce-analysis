@@ -1,5 +1,8 @@
 -- Products, category value and volume, freight, concentration, monthly growth and repeat purchases.
 
+-- Question: Which three products generate the most revenue within each category?
+-- Sales use item prices, exclude freight, and have no order-status filter.
+-- ROW_NUMBER selects three products even when revenue ties.
 WITH product_sales AS (
     SELECT
         oi.product_id,
@@ -37,6 +40,8 @@ ORDER BY
     product_category_name,
     product_rank;
 
+-- Question: Which categories contribute more revenue share than item-volume share?
+-- The gap is in percentage points; item rows measure volume, not distinct orders.
 WITH category_performance AS (
     SELECT
         p.product_category_name,
@@ -77,6 +82,8 @@ SELECT
 FROM category_shares
 ORDER BY revenue_volume_gap_pct DESC;
 
+-- Question: How large are freight charges relative to product sales by category?
+-- The ratio uses total freight / total item price, rather than an average of item ratios.
 SELECT
     p.product_category_name,
     COUNT(*) AS items_sold,
@@ -94,6 +101,7 @@ JOIN olist_products_dataset p
 GROUP BY p.product_category_name
 ORDER BY freight_to_product_pct DESC;
 
+-- Question: How dependent is each named category on its top three products?
 WITH product_revenue AS (
     SELECT
         p.product_category_name,
@@ -137,6 +145,9 @@ GROUP BY product_category_name
 ORDER BY top_3_revenue_share_pct DESC;
 
 -- MoM category growth
+-- Question: How does category revenue change from the previous calendar month?
+-- A month spine and category cross join include months with no sales as zero.
+-- NULLIF leaves growth undefined when the previous month has zero revenue.
 
 WITH RECURSIVE month_spine AS (
 
@@ -264,6 +275,9 @@ ORDER BY
     month;
 
 -- repeat customer rate by category
+-- Question: What share of each category's customers placed more than one order in it?
+-- Uses customer_unique_id and distinct orders across all statuses.
+-- Customers may appear in multiple categories; this is not marketplace-wide retention.
 
 WITH customer_category_behavior AS (
 
@@ -319,6 +333,9 @@ GROUP BY product_category_name
 
 ORDER BY repeat_customer_pct DESC;
 
+-- Question: How do category sales compare with customer review scores?
+-- Average review records per order before joining distinct order-category pairs.
+-- Multi-category orders contribute their order-level score to each named category.
 WITH order_review AS (
     SELECT
         order_id,

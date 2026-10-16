@@ -1,6 +1,11 @@
 -- Delivered-order cohort retention; distinct from all-status dashboard cohort view.
 
 -- cohort retention %
+-- Question: What percentage of each first-delivered-purchase cohort buys again by month?
+-- customer_unique_id links repeat purchases across customer_id values.
+-- Month 0 defines cohort size; DISTINCT counts a person once per active month.
+-- Output grain: one cohort month and month offset with observed activity.
+-- Missing activity months are absent, not explicit zero rows; newer cohorts have shorter follow-up.
 
 WITH customer_first_purchase AS (
     SELECT

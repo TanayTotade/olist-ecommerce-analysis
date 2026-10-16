@@ -1,6 +1,9 @@
 -- Regional concentration, purchasing behavior and delivery performance.
 
 -- cumulative revenue concentration by state
+-- Question: How concentrated are product sales across customer states?
+-- Excludes canceled/unavailable orders; revenue excludes freight.
+-- Aggregate items to one order before counting orders and calculating state shares.
 
 WITH order_revenue AS (
     SELECT
@@ -57,6 +60,8 @@ FROM state_metrics
 ORDER BY revenue DESC;
 
 -- regional purchasing behavior
+-- Question: How do order frequency and spending differ by customer state?
+-- Uses the same sales scope; customer_unique_id identifies distinct people within each state.
 
 WITH order_revenue AS (
     SELECT
@@ -111,6 +116,9 @@ FROM state_behavior
 ORDER BY revenue_per_customer DESC;
 
 -- delivery performance by state
+-- Question: Which states have slower or less reliable delivered orders?
+-- Requires purchase, delivery and estimate timestamps; no chronology check is applied.
+-- Elapsed whole hours / 24 gives days; lateness compares full timestamps.
 
 SELECT
     c.customer_state,

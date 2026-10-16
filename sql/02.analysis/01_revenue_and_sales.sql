@@ -2,6 +2,9 @@
 
 
 -- Revenue Baseline
+-- Question: What are product sales and average value per order with items?
+-- SUM(price) excludes freight; no order-status filter is applied.
+-- Distinct order IDs prevent multiple items from inflating the AOV denominator.
 SELECT
     ROUND(SUM(price), 2) AS total_revenue,
     COUNT(DISTINCT order_id) AS orders_with_items,
@@ -12,6 +15,8 @@ SELECT
 FROM olist_order_items_dataset;
 
 -- Monthly_revenue_trend
+-- Question: How do product sales change by purchase month?
+-- Only orders with matching item records contribute; missing months are not filled.
 SELECT
     DATE_FORMAT(o.order_purchase_timestamp, '%Y-%m') AS month,
     ROUND(SUM(oi.price), 2) AS revenue,

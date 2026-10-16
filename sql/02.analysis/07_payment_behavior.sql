@@ -1,6 +1,9 @@
 -- Payment usage and value, installments, payment complexity, monthly/state patterns and outcomes.
 
 -- 1.Payment Method Usage
+-- Question: What percentage of orders with payment records uses each method?
+-- An order can use several methods, so method usage percentages can sum above 100.
+-- No order-status filter is applied unless a later query explicitly adds one.
 
 SELECT
     payment_type,
@@ -16,6 +19,7 @@ GROUP BY payment_type
 ORDER BY orders DESC;
 
 -- 2.Revenue/value by payment method
+-- Payment-value share uses payment records, not item-price revenue.
 
 SELECT
     payment_type,
@@ -31,6 +35,8 @@ GROUP BY payment_type
 ORDER BY payment_value DESC;
 
 -- 3.Installment Behavior
+-- Question: How are credit-card orders distributed by installment count?
+-- An order with different installment counts on separate records can appear in several groups.
 
 SELECT
     payment_installments,
@@ -49,6 +55,8 @@ WHERE payment_type = 'credit_card'
 GROUP BY payment_installments
 ORDER BY payment_installments;
 
+-- Question: How does payment-record value vary across installment bands?
+-- AVG(payment_value) is per payment record, not total order value; zero installments are excluded.
 SELECT
     CASE
         WHEN payment_installments = 1 THEN 'Single payment'
@@ -79,6 +87,8 @@ ORDER BY
     END;
 
 -- 5.Multiple payment orders
+-- Question: How many payment records does each order have?
+-- Multiple records do not necessarily mean multiple distinct payment methods.
 
 WITH order_payments AS
 (
@@ -102,6 +112,7 @@ GROUP BY payment_count
 ORDER BY payment_count;
 
 -- different payment method by order
+-- Question: How many distinct payment methods does each order use?
 
 WITH order_payment_methods AS
 (
@@ -125,6 +136,8 @@ FROM order_payment_methods
 GROUP BY payment_methods
 ORDER BY payment_methods;
 
+-- Question: How does method usage change by purchase month?
+-- Denominator: distinct orders with a defined method in that month; methods can overlap.
 WITH monthly_payments AS
 (
     SELECT
@@ -168,6 +181,8 @@ ORDER BY
     pct_of_monthly_orders DESC;
 
 -- 7.Regional payment behavior
+-- Question: How does payment-method usage vary by customer state?
+-- Denominator: orders with defined payment methods in that state; shares can overlap.
 
 WITH state_payment AS
 (
@@ -243,6 +258,8 @@ GROUP BY
 ORDER BY so.total_orders DESC;
 
 -- 8.Payment method and Customer satisfaction
+-- Question: How much is paid through each method per order?
+-- Aggregate payment records to order-method grain before calculating value statistics.
 
 WITH order_payment_type AS
 (
@@ -268,6 +285,9 @@ GROUP BY payment_type
 ORDER BY avg_payment_value DESC;
 
 -- customer satisfaction with payment method
+-- Question: How do review outcomes differ across payment methods?
+-- Average reviews to one score per order; negative means that average is <= 2.
+-- A mixed-method order contributes to every method it uses; this is an association.
 
 WITH order_payment_method AS
 (
@@ -320,6 +340,9 @@ GROUP BY p.payment_type
 ORDER BY avg_review_score DESC;
 
 -- delivery performance
+-- Question: How do delivery outcomes differ across payment methods?
+-- Uses delivered orders with required dates; elapsed hours / 24 gives days.
+-- Timestamp chronology is not validated here; mixed-method orders appear in each method.
 
 WITH order_payment_method AS
 (

@@ -3,6 +3,8 @@
 -- 1.Overall customer satisfaction
 
 -- customer review distribution
+-- Question: What is the distribution of scores across review records?
+-- These queries retain multiple reviews per order; counts are not unique reviewed orders.
 
 SELECT
     review_score,
@@ -16,6 +18,8 @@ GROUP BY review_score
 ORDER BY review_score;
 
 -- overall average review score
+-- Positive = scores 4-5; neutral = 3; negative = 1-2.
+-- Percentages use all review records as the denominator.
 
 SELECT
     COUNT(*) AS total_reviews,
@@ -45,6 +49,7 @@ FROM olist_order_reviews_dataset;
 -- Customer Satisfaction over Time
 
 -- Monthly review performance
+-- Question: How does satisfaction vary by purchase month (not review creation month)?
 
 SELECT
     DATE_FORMAT(o.order_purchase_timestamp, '%Y-%m') AS purchase_month,
@@ -77,6 +82,8 @@ ORDER BY
     purchase_month;
 
 -- On-Time vs Late Reviews
+-- Question: How do review scores differ for delivered orders by delivery outcome?
+-- Requires delivery and estimated dates; comparison uses full timestamps.
 
 SELECT
     CASE
@@ -118,6 +125,10 @@ GROUP BY
     END;
 
 -- Rank categories with meaningful volume
+-- Question: Which categories have the strongest satisfaction among those with 200+ review rows?
+-- Deduplicate order-category pairs before joining reviews to avoid item-level duplication.
+-- Multi-category orders contribute reviews to each category; repeated order reviews remain.
+-- The volume threshold limits comparisons based on very small samples.
 
 WITH order_categories AS (
     SELECT DISTINCT

@@ -1,6 +1,8 @@
 -- Comment participation, final eight-theme classifier and delivery-complaint outcomes.
 
 -- customer behavior by review score
+-- Question: How often do customers leave comments, and how long are they?
+-- Counts review records; NULL/blank comments are excluded from comment length averages.
 
 SELECT
     review_score,
@@ -43,6 +45,10 @@ GROUP BY review_score
 ORDER BY review_score;
 
 -- new complaint theme
+-- Question: Which complaint themes occur in nonblank negative reviews (scores 1-2)?
+-- Portuguese keyword rules are approximate and may miss or misclassify comments.
+-- Themes overlap: one comment may match several; theme counts are not additive.
+-- classified_pct counts comments matching at least one theme, not classification accuracy.
 
 WITH classified_reviews AS (
     SELECT
@@ -157,6 +163,9 @@ SELECT
 
 FROM classified_reviews;
 
+-- Question: What recorded delivery outcomes accompany delivery-related negative comments?
+-- Counts matching review records, not distinct orders; outcomes are from the order table.
+-- Missing delivery dates form a separate group; a missing estimate falls into the ELSE group.
 WITH delivery_complaints AS (
     SELECT
         r.order_id,
@@ -206,6 +215,8 @@ GROUP BY
 
 ORDER BY complaint_reviews DESC;
 
+-- Question: What order statuses occur among delivery complaints with no delivery date?
+-- Percentages use only matching review rows whose order has no recorded delivery date.
 WITH delivery_complaints AS (
     SELECT
         r.order_id

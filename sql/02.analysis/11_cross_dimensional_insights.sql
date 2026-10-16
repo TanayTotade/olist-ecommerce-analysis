@@ -3,6 +3,12 @@
 -- Original SQL retained without logic changes. See docs/query_provenance.md.
 
 -- Defining Risky Sellers
+-- Question: Does negative feedback persist for risky sellers even on on-time deliveries?
+-- Restrict to single-seller orders to make seller attribution unambiguous.
+-- Risk uses on-time review rows: 50+ required and >=15% negative (scores 1-2).
+-- Direct review joins preserve multiple reviews per order despite order-based output aliases.
+-- These are descriptive thresholds, not a predictive model or evidence of causation.
+-- Final comparison excludes insufficient history; NULL estimates fall into the on-time ELSE branch.
 
 WITH single_seller_orders AS (
     SELECT
@@ -127,6 +133,10 @@ ORDER BY
     END;
 
 -- Delivery Category Risk
+-- Question: How do delivery outcome and category risk relate to negative feedback?
+-- Keep orders with exactly one known, nonblank category after filtering item categories.
+-- Risk uses on-time review rows: 100+ required and >=12% negative.
+-- Counts remain at review-record grain; final results omit insufficient-history categories.
 
 WITH single_category_orders AS (
     SELECT

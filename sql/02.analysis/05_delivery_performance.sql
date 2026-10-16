@@ -1,6 +1,7 @@
 -- Fulfillment, delivery distribution, stages, state/month patterns and review score distribution.
 
 -- Order status and fulfillment rate
+-- Question: What share of all orders is in each fulfillment status?
 
 SELECT
     order_status,
@@ -14,6 +15,9 @@ GROUP BY order_status
 ORDER BY total_orders DESC;
 
 -- delivery time distribution
+-- Question: How are eligible delivered orders distributed across delivery-time bands?
+-- DATEDIFF uses calendar days; exclude missing delivery dates and delivery before purchase.
+-- Percentages use only orders surviving these filters.
 
 WITH delivery_times AS (
     SELECT
@@ -58,6 +62,9 @@ GROUP BY delivery_band, band_order
 ORDER BY band_order;
 
 -- Approval, Dispatch and Shipping Duration
+-- Question: Which fulfillment stage accounts for elapsed delivery time?
+-- Require all stage timestamps in chronological order to avoid negative durations.
+-- Seconds / 86400.0 preserves fractional days; all stage averages use the same orders.
 
 WITH fulfillment_durations AS (
     SELECT
@@ -105,6 +112,8 @@ SELECT
     ) AS avg_total_delivery_days
 FROM fulfillment_durations;
 
+-- Question: Which fulfillment stages differ between on-time and late deliveries?
+-- Reuses chronological stage eligibility and also requires an estimated delivery date.
 WITH fulfillment_durations AS (
     SELECT
         order_id,
@@ -162,6 +171,9 @@ GROUP BY delivery_performance
 ORDER BY FIELD(delivery_performance, 'On time', 'Late');
 
 -- Delivery performance by state
+-- Question: How do delivery speed and lateness vary by customer state?
+-- Late means a positive calendar-day difference from the estimate.
+-- avg_days_late excludes on-time orders; late_delivery_pct includes all eligible orders.
 
 WITH state_delivery AS (
     SELECT
@@ -218,6 +230,8 @@ GROUP BY customer_state
 ORDER BY late_delivery_pct DESC, delivered_orders DESC;
 
 -- monthly delivery performance
+-- Question: How does delivery performance vary by purchase month?
+-- Group by purchase month, not delivery month; eligibility follows this query's filters.
 
 WITH delivery_metrics AS (
     SELECT
@@ -273,6 +287,8 @@ GROUP BY purchase_month
 ORDER BY purchase_month;
 
 -- monthly approval, dispatch and shipping duration
+-- Question: How do stage durations compare for purchases in February-June 2018?
+-- This focused date window is narrower than the full-period analyses above.
 
 WITH monthly_durations AS (
     SELECT
@@ -328,6 +344,10 @@ GROUP BY purchase_month
 ORDER BY purchase_month;
 
 -- review score distribution
+-- Question: How does the review-score mix differ between delivery outcomes?
+-- Counts review records, so an order with multiple reviews contributes multiple rows.
+-- Percentages sum to 100 within each delivery status.
+-- This query compares full timestamps; earlier DATEDIFF comparisons use calendar dates.
 
 SELECT
     CASE

@@ -1,6 +1,8 @@
 -- Seller concentration, order failures and consolidated seller performance.
 
 -- Seller Revenue Contribution
+-- Question: How concentrated are product sales among the top ten sellers?
+-- Revenue excludes freight and includes all statuses; shares use all sellers before top-ten filtering.
 
 WITH seller_revenue AS (
     SELECT
@@ -40,6 +42,9 @@ WHERE seller_rank<=10
 ORDER BY seller_rank;
 
 -- Seller Order failure rate
+-- Question: Which sellers have the highest canceled/unavailable order shares?
+-- DISTINCT seller-order pairs avoid counting an order once per item.
+-- Require 50+ orders to reduce sensitivity to small samples; denominator is all seller orders.
 
 WITH seller_orders AS (
     SELECT DISTINCT
@@ -100,6 +105,12 @@ HAVING COUNT(*) >= 50
 ORDER BY failed_order_pct DESC;
 
 -- Seller Performance Table
+-- Question: How do established sellers compare commercially and operationally?
+-- Multi-seller orders attribute the same order-level delivery and review outcome to each seller.
+-- Reviews are averaged per order; negative-review rate tests that order average <= 2.
+-- AVG excludes NULL metrics, so delivery and review denominators differ from total_orders.
+-- Dispatch uses whole elapsed hours / 24 and does not filter invalid timestamp sequences.
+-- Marketplace revenue share uses all sellers, including those below the 50-order threshold.
 
 
 WITH seller_orders AS (
