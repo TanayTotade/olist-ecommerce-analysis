@@ -1,8 +1,8 @@
--- Products, category value and volume, freight, concentration, monthly growth and repeat purchases.
+-- Product and category supporting analysis; product_revenue consistently excludes freight.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
--- Question: Which three products generate the most revenue within each category?
--- Sales use item prices, exclude freight, and have no order-status filter.
--- ROW_NUMBER selects three products even when revenue ties.
+-- Question: Which three products lead each category by product revenue?
+-- All statuses; product prices exclude freight. ROW_NUMBER selects three even when tied.
 WITH product_sales AS (
     SELECT
         oi.product_id,
@@ -21,7 +21,7 @@ ranked_products AS (
         product_id,
         product_category_name,
         items_sold,
-        ROUND(product_revenue, 2) AS revenue,
+        ROUND(product_revenue, 2) AS product_revenue,
         ROW_NUMBER() OVER (
             PARTITION BY product_category_name
             ORDER BY product_revenue DESC
@@ -32,7 +32,7 @@ SELECT
     product_category_name,
     product_id,
     items_sold,
-    revenue,
+    product_revenue,
     product_rank
 FROM ranked_products
 WHERE product_rank <= 3
@@ -40,13 +40,13 @@ ORDER BY
     product_category_name,
     product_rank;
 
--- Question: Which categories contribute more revenue share than item-volume share?
--- The gap is in percentage points; item rows measure volume, not distinct orders.
+-- Question: Which categories have greater product-revenue share than item-volume share?
+-- The difference is percentage points; COUNT(*) measures item rows, not orders.
 WITH category_performance AS (
     SELECT
         p.product_category_name,
         COUNT(*) AS items_sold,
-        SUM(oi.price) AS revenue
+        SUM(oi.price) AS product_revenue
     FROM olist_order_items_dataset oi
     JOIN olist_products_dataset p
         ON oi.product_id = p.product_id
@@ -57,16 +57,16 @@ category_shares AS (
     SELECT
         product_category_name,
         items_sold,
-        revenue,
+        product_revenue,
         items_sold / SUM(items_sold) OVER () * 100 AS volume_share_pct,
-        revenue / SUM(revenue) OVER () * 100 AS revenue_share_pct
+        product_revenue / SUM(product_revenue) OVER () * 100 AS revenue_share_pct
     FROM category_performance
 )
 
 SELECT
     product_category_name,
     items_sold,
-    ROUND(revenue, 2) AS revenue,
+    ROUND(product_revenue, 2) AS product_revenue,
     ROUND(volume_share_pct, 2) AS volume_share_pct,
     ROUND(revenue_share_pct, 2) AS revenue_share_pct,
     ROUND(revenue_share_pct - volume_share_pct, 2) AS revenue_volume_gap_pct,
@@ -82,8 +82,8 @@ SELECT
 FROM category_shares
 ORDER BY revenue_volume_gap_pct DESC;
 
--- Question: How large are freight charges relative to product sales by category?
--- The ratio uses total freight / total item price, rather than an average of item ratios.
+-- Question: How large are freight charges relative to product sales?
+-- Ratio of total freight to total item price; not an average of item ratios.
 SELECT
     p.product_category_name,
     COUNT(*) AS items_sold,
@@ -101,7 +101,8 @@ JOIN olist_products_dataset p
 GROUP BY p.product_category_name
 ORDER BY freight_to_product_pct DESC;
 
--- Question: How dependent is each named category on its top three products?
+-- Question: How concentrated is each named category in its three highest-selling products?
+-- Product-only revenue, all statuses. Categories with fewer than three products can reach 100%.
 WITH product_revenue AS (
     SELECT
         p.product_category_name,
@@ -144,11 +145,9 @@ FROM ranked_products
 GROUP BY product_category_name
 ORDER BY top_3_revenue_share_pct DESC;
 
--- MoM category growth
--- Question: How does category revenue change from the previous calendar month?
--- A month spine and category cross join include months with no sales as zero.
--- NULLIF leaves growth undefined when the previous month has zero revenue.
-
+-- Question: How does category product revenue change from the previous calendar month?
+-- The month spine fills missing sales with zero; growth is NULL after zero prior revenue.
+-- Endpoint months have limited coverage; a final zero month does not establish a business collapse.
 WITH RECURSIVE month_spine AS (
 
     SELECT
@@ -199,7 +198,7 @@ monthly_sales AS (
         p.product_category_name,
 
         COUNT(*) AS items_sold,
-        SUM(oi.price) AS revenue
+        SUM(oi.price) AS product_revenue
 
     FROM olist_orders_dataset o
 
@@ -228,7 +227,7 @@ complete_series AS (
         c.product_category_name,
 
         COALESCE(s.items_sold, 0) AS items_sold,
-        COALESCE(s.revenue, 0) AS revenue
+        COALESCE(s.product_revenue, 0) AS product_revenue
 
     FROM month_spine ms
 
@@ -244,9 +243,9 @@ category_growth AS (
         month,
         product_category_name,
         items_sold,
-        revenue,
+        product_revenue,
 
-        LAG(revenue) OVER (
+        LAG(product_revenue) OVER (
             PARTITION BY product_category_name
             ORDER BY month
         ) AS previous_month_revenue
@@ -259,11 +258,11 @@ SELECT
     product_category_name,
     items_sold,
 
-    ROUND(revenue, 2) AS revenue,
+    ROUND(product_revenue, 2) AS product_revenue,
     ROUND(previous_month_revenue, 2) AS previous_month_revenue,
 
     ROUND(
-        (revenue - previous_month_revenue)
+        (product_revenue - previous_month_revenue)
         / NULLIF(previous_month_revenue, 0) * 100,
         2
     ) AS mom_growth_pct
@@ -274,11 +273,8 @@ ORDER BY
     product_category_name,
     month;
 
--- repeat customer rate by category
--- Question: What share of each category's customers placed more than one order in it?
--- Uses customer_unique_id and distinct orders across all statuses.
--- Customers may appear in multiple categories; this is not marketplace-wide retention.
-
+-- Question: What share of each named category's customers ordered in it more than once?
+-- All statuses; distinct orders per person. Customers can belong to several categories.
 WITH customer_category_behavior AS (
 
     SELECT
@@ -333,17 +329,19 @@ GROUP BY product_category_name
 
 ORDER BY repeat_customer_pct DESC;
 
--- Question: How do category sales compare with customer review scores?
--- Average review records per order before joining distinct order-category pairs.
--- Multi-category orders contribute their order-level score to each named category.
-WITH order_review AS (
-    SELECT
-        order_id,
-        AVG(review_score) AS order_review_score
-    FROM olist_order_reviews_dataset
-    GROUP BY order_id
+-- Question: How do product sales and satisfaction compare by category?
+-- Use the latest review per order; distinct order-category pairs avoid item multiplication.
+-- A multi-category order contributes its order-level score to each category.
+WITH ranked_reviews AS (
+    SELECT r.*, ROW_NUMBER() OVER (
+        PARTITION BY r.order_id
+        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    ) AS review_rank
+    FROM olist_order_reviews_dataset r
 ),
-
+order_reviews AS (
+    SELECT * FROM ranked_reviews WHERE review_rank = 1
+),
 order_categories AS (
     SELECT DISTINCT
         oi.order_id,
@@ -362,11 +360,11 @@ category_reviews AS (
 
         COUNT(*) AS reviewed_orders,
 
-        AVG(orv.order_review_score) AS avg_review_score
+        AVG(orv.review_score) AS avg_review_score
 
     FROM order_categories oc
 
-    JOIN order_review orv
+    JOIN order_reviews orv
         ON oc.order_id = orv.order_id
 
     GROUP BY oc.product_category_name
@@ -377,7 +375,7 @@ category_sales AS (
         p.product_category_name,
 
         COUNT(*) AS items_sold,
-        SUM(oi.price) AS revenue
+        SUM(oi.price) AS product_revenue
 
     FROM olist_order_items_dataset oi
 
@@ -394,8 +392,8 @@ SELECT
 
     cs.items_sold,
 
-    ROUND(cs.revenue, 2)
-        AS revenue,
+    ROUND(cs.product_revenue, 2)
+        AS product_revenue,
 
     cr.reviewed_orders,
 
@@ -408,4 +406,5 @@ LEFT JOIN category_reviews cr
     ON cs.product_category_name =
        cr.product_category_name
 
-ORDER BY cs.revenue DESC;
+ORDER BY cs.product_revenue DESC;
+

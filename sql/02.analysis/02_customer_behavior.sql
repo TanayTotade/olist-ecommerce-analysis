@@ -1,9 +1,8 @@
--- Customer mix, spend bands, repeat purchase value and purchase intervals.
+-- Customer counts, spending and purchase progression using all order statuses.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
--- One-time vs repeat customers
-
--- Identify people with customer_unique_id; customer_id identifies an order's customer record.
--- This first comparison includes all order statuses.
+-- Question: How many people purchased once versus more than once?
+-- Use customer_unique_id to link people across order-specific customer_id records. All statuses.
 SELECT
     CASE
         WHEN order_count = 1 THEN 'One-time'
@@ -21,10 +20,8 @@ FROM (
 ) x
 GROUP BY customer_type;
 
--- Customer revenue distribution
--- Question: How is delivered-order spending distributed across customers?
--- Spending includes item price plus freight; customers without delivered items are excluded.
-
+-- Question: How is customer spending distributed?
+-- Includes freight and all statuses; orders without item values contribute zero spending.
 SELECT
 	CASE
 		WHEN total_revenue < 100 THEN '<100'
@@ -39,13 +36,13 @@ SELECT
 FROM (
 	SELECT
 		c.customer_unique_id,
-		SUM(oi.price + oi.freight_value) AS total_revenue
+		SUM(COALESCE(oi.price + oi.freight_value, 0)) AS total_revenue
 	FROM olist_customers_dataset c 
 	JOIN olist_orders_dataset o 
 		ON c.customer_id = o.customer_id
-	JOIN olist_order_items_dataset oi
+	LEFT JOIN olist_order_items_dataset oi
 		ON o.order_id = oi.order_id
-	WHERE o.order_status = 'delivered'
+	
 	GROUP BY c.customer_unique_id
 ) AS customer_revenue
 GROUP BY revenue_segment
@@ -58,21 +55,20 @@ ORDER BY
         WHEN '1000+' THEN 5
     END;
 
--- One-time vs repeat customers comparison
--- Question: How do spending and order frequency differ between customer groups?
--- Here the group definition uses delivered orders only, unlike the first query.
-
+-- Question: How do one-time and repeat customers differ in value and frequency?
+-- Combines customer counts, average value, total value, revenue share and order frequency.
+-- All statuses; item-plus-freight revenue; distinct orders avoid item multiplication.
 WITH customer_summary AS (
 	SELECT
 		c.customer_unique_id,
 		COUNT(DISTINCT o.order_id) AS orders,
-		SUM(oi.price + oi.freight_value) AS total_revenue
+		SUM(COALESCE(oi.price + oi.freight_value, 0)) AS total_revenue
 	FROM olist_customers_dataset c 
 	JOIN olist_orders_dataset o 
 		ON c.customer_id = o.customer_id
-	JOIN olist_order_items_dataset oi
+	LEFT JOIN olist_order_items_dataset oi
 		ON o.order_id = oi.order_id
-	WHERE o.order_status = 'delivered'
+	
 	GROUP BY c.customer_unique_id		
 )
 SELECT
@@ -83,64 +79,27 @@ SELECT
     COUNT(*) AS customers,
     ROUND(AVG(total_revenue), 2) AS avg_total_revenue,
     ROUND(SUM(total_revenue), 2) AS total_revenue,
+    ROUND(SUM(total_revenue) * 100.0 / NULLIF(SUM(SUM(total_revenue)) OVER (), 0), 2) AS revenue_share_pct,
     ROUND(AVG(orders), 2) AS avg_orders_per_customer
 FROM customer_summary
 GROUP BY customer_type;
 
--- Revenue contribution
--- Question: What share of delivered item-plus-freight revenue comes from each group?
-
-WITH customer_summary AS (
-	SELECT
-		c.customer_unique_id,
-		COUNT(DISTINCT o.order_id) AS orders,
-		SUM(oi.price + oi.freight_value) AS revenue
-	FROM olist_customers_dataset c 
-	JOIN olist_orders_dataset o 
-		ON c.customer_id = o.customer_id
-	JOIN olist_order_items_dataset oi
-		ON o.order_id = oi.order_id
-	WHERE o.order_status = 'delivered'
-	GROUP BY c.customer_unique_id		
-),
-customer_group AS (
-	SELECT
-		CASE
-			WHEN orders = 1 THEN 'One-time'
-			ELSE 'Repeat'
-		END AS customer_type,
-		COUNT(*) AS customers,
-		SUM(revenue) AS total_revenue
-	FROM customer_summary
-    GROUP BY customer_type
-)
-SELECT
-	customer_type,
-    customers,
-    total_revenue,
-    ROUND(
-		total_revenue / SUM(total_revenue) OVER() * 100,
-        2
-	) AS revenue_share_pct
-FROM customer_group;
-
--- Summarizing repeat-purchase intervals
--- LAG compares consecutive delivered purchases for each person.
--- Each interval is one observation; frequent buyers can contribute multiple intervals.
--- DATEDIFF measures calendar-day differences.
-
+-- Question: How long is the interval between consecutive purchases?
+-- All statuses with purchase timestamps; each interval is an observation, not each person.
+-- DATEDIFF measures calendar days. Order ID breaks equal-timestamp ties.
 WITH customer_orders AS (
     SELECT
         c.customer_unique_id,
         o.order_purchase_timestamp,
         LAG(o.order_purchase_timestamp) OVER (
             PARTITION BY c.customer_unique_id
-            ORDER BY o.order_purchase_timestamp
+            ORDER BY o.order_purchase_timestamp, o.order_id
         ) AS previous_purchase
     FROM olist_customers_dataset c
     JOIN olist_orders_dataset o
         ON c.customer_id = o.customer_id
-    WHERE o.order_status = 'delivered'
+    WHERE o.order_purchase_timestamp IS NOT NULL
+    
 ),
 purchase_intervals AS (
     SELECT
@@ -159,22 +118,21 @@ SELECT
     MAX(days_between_orders) AS max_days_between_orders
 FROM purchase_intervals;
 
--- first-to-second purchase behavior
--- Question: How long do returning customers take to place their second delivered order?
--- Customers without a second delivered order are excluded from these averages.
-
+-- Question: How long do returning customers take to reach their second purchase?
+-- All statuses with timestamps; only customers reaching purchase 2 contribute.
 WITH customer_orders AS (
     SELECT
         c.customer_unique_id,
         o.order_purchase_timestamp,
         ROW_NUMBER() OVER (
             PARTITION BY c.customer_unique_id
-            ORDER BY o.order_purchase_timestamp
+            ORDER BY o.order_purchase_timestamp, o.order_id
         ) AS order_number
     FROM olist_customers_dataset c
     JOIN olist_orders_dataset o
         ON c.customer_id = o.customer_id
-    WHERE o.order_status = 'delivered'
+    WHERE o.order_purchase_timestamp IS NOT NULL
+    
 ),
 first_second AS (
     SELECT
@@ -207,20 +165,22 @@ SELECT
 FROM first_second
 WHERE second_order IS NOT NULL;
 
--- Question: What share of buyers at purchase N reaches purchase N+1?
--- Uses delivered purchases; the inner join omits stages with no following stage.
+-- Question: What share of customers at purchase N reaches N+1?
+-- All statuses with timestamps. Retains the terminal stage with zero next-stage customers.
+-- This is purchase-stage progression, not monthly cohort retention.
 WITH customer_orders AS (
     SELECT
         c.customer_unique_id,
         o.order_id,
         ROW_NUMBER() OVER (
             PARTITION BY c.customer_unique_id
-            ORDER BY o.order_purchase_timestamp
+            ORDER BY o.order_purchase_timestamp, o.order_id
         ) AS order_number
     FROM olist_customers_dataset c
     JOIN olist_orders_dataset o
         ON c.customer_id = o.customer_id
-    WHERE o.order_status = 'delivered'
+    WHERE o.order_purchase_timestamp IS NOT NULL
+    
 ),
 purchase_counts AS (
     SELECT
@@ -232,12 +192,13 @@ purchase_counts AS (
 SELECT
     p1.order_number AS from_purchase,
     p1.customers AS customers_at_stage,
-    p2.customers AS customers_at_next_stage,
+    COALESCE(p2.customers, 0) AS customers_at_next_stage,
     ROUND(
-        p2.customers / p1.customers * 100,
+        COALESCE(p2.customers, 0) * 1.0 / p1.customers * 100,
         2
     ) AS next_purchase_retention_pct
 FROM purchase_counts p1
-JOIN purchase_counts p2
+LEFT JOIN purchase_counts p2
     ON p2.order_number = p1.order_number + 1
 ORDER BY p1.order_number;
+

@@ -1,7 +1,9 @@
--- Original delivery and review dashboard views; methodology differences are preserved.
+-- Delivery and latest-review dashboard views; shared delay definitions.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
--- Delivery Performance View
-
+-- Eligible delivered orders: complete chronological stage dates and an estimate.
+-- Full timestamp lateness; delay bands represent (0,3], (3,7], (7,14], and >14 days.
+-- Labels are retained for Tableau compatibility; fractions of days are included.
 CREATE OR REPLACE VIEW vw_delivery_performance AS
 
 SELECT
@@ -112,8 +114,8 @@ WHERE
     AND o.order_delivered_carrier_date >= o.order_approved_at
     AND o.order_delivered_customer_date >= o.order_delivered_carrier_date;
 
--- Review Performance View
-
+-- Latest review per order for satisfaction and delivery context.
+-- Includes reviewed orders outside operational eligibility; the impact view filters to eligible deliveries.
 CREATE OR REPLACE VIEW vw_review_performance AS
 
 WITH ranked_reviews AS (
@@ -152,18 +154,18 @@ SELECT
 
     r.review_score,
 
-    -- =====================================================
-    -- SATISFACTION
-    -- =====================================================
+    
+    
+    
     CASE
         WHEN r.review_score <= 2 THEN 'Negative'
         WHEN r.review_score = 3 THEN 'Neutral'
         WHEN r.review_score >= 4 THEN 'Positive'
     END AS satisfaction_segment,
 
-    -- =====================================================
-    -- DELIVERY STATUS
-    -- =====================================================
+    
+    
+    
     CASE
         WHEN o.order_delivered_customer_date IS NULL
             THEN 'Not Delivered'
@@ -178,9 +180,9 @@ SELECT
         ELSE 'On Time / Early'
     END AS delivery_status,
 
-    -- =====================================================
-    -- TOTAL DELIVERY TIME
-    -- =====================================================
+    
+    
+    
     CASE
         WHEN o.order_delivered_customer_date IS NOT NULL
              AND o.order_purchase_timestamp IS NOT NULL
@@ -194,9 +196,9 @@ SELECT
         )
     END AS delivery_days,
 
-    -- =====================================================
-    -- DAYS VS ESTIMATED DELIVERY
-    -- =====================================================
+    
+    
+    
     CASE
         WHEN o.order_delivered_customer_date IS NOT NULL
              AND o.order_estimated_delivery_date IS NOT NULL
@@ -210,9 +212,9 @@ SELECT
         )
     END AS days_vs_estimate,
 
-    -- =====================================================
-    -- DELAY SEVERITY
-    -- =====================================================
+    
+    
+    
     CASE
         WHEN o.order_delivered_customer_date IS NULL
             THEN 'Not Delivered'
@@ -256,104 +258,21 @@ JOIN olist_customers_dataset c
 JOIN deduplicated_reviews r
     ON o.order_id = r.order_id;
 
--- Delivery impact View
-
+-- Delay impact: join eligible deliveries to the latest review by order.
+-- Reuses the exact order-level delay bands and eligibility rather than a second definition.
 CREATE OR REPLACE VIEW vw_delivery_review_impact AS
-
-WITH order_reviews AS (
-    -- Reduce reviews to one score per order.
-    -- AVG protects against duplicate/multiple review rows.
-    SELECT
-        order_id,
-        AVG(review_score) AS review_score
-    FROM olist_order_reviews_dataset
-    GROUP BY order_id
-),
-
-delivery_reviews AS (
-    SELECT
-        o.order_id,
-
-        DATEDIFF(
-            o.order_delivered_customer_date,
-            o.order_estimated_delivery_date
-        ) AS days_vs_estimate,
-
-        r.review_score
-
-    FROM olist_orders_dataset o
-
-    INNER JOIN order_reviews r
-        ON o.order_id = r.order_id
-
-    WHERE o.order_status = 'delivered'
-      AND o.order_delivered_customer_date IS NOT NULL
-      AND o.order_estimated_delivery_date IS NOT NULL
-),
-
-bucketed AS (
-    SELECT
-        order_id,
-        review_score,
-
-        CASE
-            WHEN days_vs_estimate <= 0
-                THEN 'On Time / Early'
-
-            WHEN days_vs_estimate BETWEEN 1 AND 3
-                THEN '1-3 Days Late'
-
-            WHEN days_vs_estimate BETWEEN 4 AND 7
-                THEN '4-7 Days Late'
-
-            WHEN days_vs_estimate BETWEEN 8 AND 14
-                THEN '8-14 Days Late'
-
-            ELSE '15+ Days Late'
-        END AS delay_bucket,
-
-        CASE
-            WHEN days_vs_estimate <= 0 THEN 1
-            WHEN days_vs_estimate <= 3 THEN 2
-            WHEN days_vs_estimate <= 7 THEN 3
-            WHEN days_vs_estimate <= 14 THEN 4
-            ELSE 5
+WITH bucketed AS (
+    SELECT d.delay_bucket, r.review_score,
+        CASE d.delay_bucket
+            WHEN 'On Time / Early' THEN 1 WHEN '1-3 Days Late' THEN 2
+            WHEN '4-7 Days Late' THEN 3 WHEN '8-14 Days Late' THEN 4 ELSE 5
         END AS delay_bucket_order
-
-    FROM delivery_reviews
+    FROM vw_delivery_performance d
+    JOIN vw_review_performance r ON d.order_id = r.order_id
 )
+SELECT delay_bucket, delay_bucket_order, COUNT(*) AS reviewed_orders,
+    ROUND(AVG(review_score), 2) AS avg_review_score,
+    SUM(review_score <= 2) AS negative_reviews,
+    ROUND(100.0 * SUM(review_score <= 2) / COUNT(*), 2) AS negative_review_pct
+FROM bucketed GROUP BY delay_bucket, delay_bucket_order;
 
-SELECT
-    delay_bucket,
-    delay_bucket_order,
-
-    COUNT(*) AS reviewed_orders,
-
-    ROUND(
-        AVG(review_score),
-        2
-    ) AS avg_review_score,
-
-    SUM(
-        CASE
-            WHEN review_score <= 2 THEN 1
-            ELSE 0
-        END
-    ) AS negative_reviews,
-
-    ROUND(
-        100.0 *
-        SUM(
-            CASE
-                WHEN review_score <= 2 THEN 1
-                ELSE 0
-            END
-        ) / COUNT(*),
-        2
-    ) AS negative_review_pct
-
-FROM bucketed
-
-GROUP BY
-    delay_bucket,
-    delay_bucket_order;

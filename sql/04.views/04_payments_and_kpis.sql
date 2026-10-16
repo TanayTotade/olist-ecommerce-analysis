@@ -1,10 +1,17 @@
--- Original payment and KPI views. Run after seller view file.
+-- Payment and KPI dashboard views. Run after the seller views.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
--- Payment Behavior View
-
+-- Payment metrics: defined methods; usage shares overlap.
+-- avg_payment_value now averages summed order-method values, not individual payment records.
 CREATE OR REPLACE VIEW vw_payment_behavior AS
 
-WITH payment_type_metrics AS (
+WITH order_payment_values AS (
+    SELECT order_id, payment_type, SUM(payment_value) AS payment_value
+    FROM olist_order_payments_dataset
+    WHERE payment_type <> 'not_defined'
+    GROUP BY order_id, payment_type
+),
+payment_type_metrics AS (
     SELECT
         payment_type,
 
@@ -14,7 +21,7 @@ WITH payment_type_metrics AS (
 
         ROUND(AVG(payment_value), 2) AS avg_payment_value
 
-    FROM olist_order_payments_dataset
+    FROM order_payment_values
 
     WHERE payment_type <> 'not_defined'
 
@@ -53,14 +60,14 @@ FROM payment_type_metrics p
 
 CROSS JOIN total_orders t;
 
--- KPI View
-
+-- KPI view: shared sales, latest-review and chronological delivery definitions.
+-- Seller KPIs read vw_seller_performance directly; unused alternative risk CTEs removed.
 CREATE OR REPLACE VIEW vw_kpis AS
 
 WITH
--- =========================================================
--- 1. ORDER-LEVEL REVENUE
--- =========================================================
+
+
+
 order_revenue AS (
     SELECT
         order_id,
@@ -69,9 +76,9 @@ order_revenue AS (
     GROUP BY order_id
 ),
 
--- =========================================================
--- 2. SALES KPIs
--- =========================================================
+
+
+
 sales_metrics AS (
     SELECT
         COUNT(DISTINCT o.order_id) AS total_orders,
@@ -84,9 +91,9 @@ sales_metrics AS (
         ON o.order_id = r.order_id
 ),
 
--- =========================================================
--- 3. CUSTOMER ORDER COUNTS
--- =========================================================
+
+
+
 customer_orders AS (
     SELECT
         c.customer_unique_id,
@@ -101,9 +108,9 @@ customer_orders AS (
         c.customer_unique_id
 ),
 
--- =========================================================
--- 4. CUSTOMER KPIs
--- =========================================================
+
+
+
 customer_metrics AS (
     SELECT
         COUNT(*) AS unique_customers,
@@ -112,13 +119,13 @@ customer_metrics AS (
     FROM customer_orders
 ),
 
--- =========================================================
--- 5. DELIVERY KPIs
---
--- Uses the same chronologically valid delivery population
--- as vw_delivery_performance.
--- Expected population: 95,082 orders
--- =========================================================
+
+
+
+
+
+
+
 delivery_metrics AS (
     SELECT
         COUNT(*) AS delivered_orders,
@@ -153,12 +160,12 @@ delivery_metrics AS (
             order_delivered_carrier_date
 ),
 
--- =========================================================
--- 6. RANK REVIEWS
---
--- Some orders contain multiple review rows.
--- Keep the latest review for each order.
--- =========================================================
+
+
+
+
+
+
 ranked_reviews AS (
     SELECT
         r.order_id,
@@ -174,10 +181,10 @@ ranked_reviews AS (
     FROM olist_order_reviews_dataset r
 ),
 
--- =========================================================
--- 7. DEDUPLICATED REVIEWS
--- Expected population: 98,672 reviewed orders
--- =========================================================
+
+
+
+
 deduplicated_reviews AS (
     SELECT
         order_id,
@@ -188,9 +195,9 @@ deduplicated_reviews AS (
     WHERE rn = 1
 ),
 
--- =========================================================
--- 8. REVIEW KPIs
--- =========================================================
+
+
+
 review_metrics AS (
     SELECT
         COUNT(*) AS reviewed_orders,
@@ -200,175 +207,9 @@ review_metrics AS (
     FROM deduplicated_reviews
 ),
 
--- =========================================================
--- 9. UNIQUE SELLER-ORDER COMBINATIONS
--- =========================================================
-seller_orders AS (
-    SELECT DISTINCT
-        oi.seller_id,
-        oi.order_id
 
-    FROM olist_order_items_dataset oi
-),
 
--- =========================================================
--- 10. ORDER-LEVEL REVIEW SCORE
---
--- TEMPORARILY retains the existing seller methodology.
--- We will reconcile this after vw_seller_performance
--- is created and validated.
--- =========================================================
-order_reviews AS (
-    SELECT
-        order_id,
-        AVG(review_score) AS review_score
 
-    FROM olist_order_reviews_dataset
-
-    GROUP BY
-        order_id
-),
-
--- =========================================================
--- 11. SELLER PERFORMANCE
--- =========================================================
-seller_performance AS (
-    SELECT
-        so.seller_id,
-
-        COUNT(DISTINCT so.order_id) AS total_orders,
-
-        AVG(
-            CASE
-                WHEN o.order_delivered_carrier_date IS NOT NULL
-                 AND o.order_purchase_timestamp IS NOT NULL
-
-                THEN TIMESTAMPDIFF(
-                    SECOND,
-                    o.order_purchase_timestamp,
-                    o.order_delivered_carrier_date
-                ) / 86400.0
-            END
-        ) AS avg_dispatch_days,
-
-        100.0 *
-        SUM(
-            CASE
-                WHEN o.order_status = 'delivered'
-                 AND o.order_delivered_customer_date IS NOT NULL
-                 AND o.order_estimated_delivery_date IS NOT NULL
-                 AND o.order_delivered_customer_date >
-                     o.order_estimated_delivery_date
-
-                THEN 1
-                ELSE 0
-            END
-        )
-        /
-        NULLIF(
-            SUM(
-                CASE
-                    WHEN o.order_status = 'delivered'
-                     AND o.order_delivered_customer_date IS NOT NULL
-                     AND o.order_estimated_delivery_date IS NOT NULL
-
-                    THEN 1
-                    ELSE 0
-                END
-            ),
-            0
-        ) AS late_delivery_pct,
-
-        AVG(r.review_score) AS avg_review_score,
-
-        100.0 *
-        SUM(
-            CASE
-                WHEN r.review_score <= 2
-                THEN 1
-                ELSE 0
-            END
-        )
-        /
-        NULLIF(
-            COUNT(r.review_score),
-            0
-        ) AS negative_review_pct
-
-    FROM seller_orders so
-
-    JOIN olist_orders_dataset o
-        ON so.order_id = o.order_id
-
-    LEFT JOIN order_reviews r
-        ON so.order_id = r.order_id
-
-    GROUP BY
-        so.seller_id
-),
-
--- =========================================================
--- 12. SELLER BENCHMARKS
--- =========================================================
-seller_benchmarks AS (
-    SELECT
-        AVG(total_orders) AS avg_total_orders,
-        AVG(avg_dispatch_days) AS avg_dispatch_days,
-        AVG(late_delivery_pct) AS avg_late_delivery_pct,
-        AVG(avg_review_score) AS avg_review_score,
-        AVG(negative_review_pct) AS avg_negative_review_pct
-
-    FROM seller_performance
-),
-
--- =========================================================
--- 13. SELLER RISK
--- =========================================================
-seller_risk AS (
-    SELECT
-        sp.seller_id,
-
-        (
-            CASE
-                WHEN sp.total_orders < b.avg_total_orders
-                THEN 1
-                ELSE 0
-            END
-            +
-            CASE
-                WHEN sp.avg_dispatch_days > b.avg_dispatch_days
-                THEN 1
-                ELSE 0
-            END
-            +
-            CASE
-                WHEN sp.late_delivery_pct > b.avg_late_delivery_pct
-                THEN 1
-                ELSE 0
-            END
-            +
-            CASE
-                WHEN sp.avg_review_score < b.avg_review_score
-                THEN 1
-                ELSE 0
-            END
-            +
-            CASE
-                WHEN sp.negative_review_pct >
-                     b.avg_negative_review_pct
-                THEN 1
-                ELSE 0
-            END
-        ) AS underperforming_kpis
-
-    FROM seller_performance sp
-
-    CROSS JOIN seller_benchmarks b
-),
-
--- =========================================================
--- 14. SELLER KPIs
--- =========================================================
 seller_metrics AS (
     SELECT
         COUNT(*) AS active_sellers,
@@ -380,11 +221,11 @@ seller_metrics AS (
     FROM vw_seller_performance
 )
 
--- =========================================================
--- 15. FINAL KPI OUTPUT
--- =========================================================
+
+
+
 SELECT
-    -- Revenue & Sales
+    
     ROUND(s.total_revenue, 2)
         AS total_revenue,
 
@@ -393,7 +234,7 @@ SELECT
     ROUND(s.avg_order_value, 2)
         AS avg_order_value,
 
-    -- Customers
+    
     c.unique_customers,
 
     ROUND(
@@ -402,7 +243,7 @@ SELECT
         2
     ) AS repeat_customer_rate_pct,
 
-    -- Delivery
+    
     ROUND(d.avg_delivery_days, 2)
         AS avg_delivery_days,
 
@@ -412,7 +253,7 @@ SELECT
         2
     ) AS late_delivery_rate_pct,
 
-    -- Customer Satisfaction
+    
     ROUND(r.avg_review_score, 2)
         AS avg_review_score,
 
@@ -422,7 +263,7 @@ SELECT
         2
     ) AS negative_review_rate_pct,
 
-    -- Sellers
+    
     sm.active_sellers,
 
     sm.high_risk_sellers,
@@ -439,3 +280,4 @@ CROSS JOIN customer_metrics c
 CROSS JOIN delivery_metrics d
 CROSS JOIN review_metrics r
 CROSS JOIN seller_metrics sm;
+

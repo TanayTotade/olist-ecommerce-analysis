@@ -1,11 +1,18 @@
--- Review distribution, monthly satisfaction, delay comparison and volume-filtered category ranking.
+-- Order-level customer satisfaction using the latest review consistently.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
--- 1.Overall customer satisfaction
-
--- customer review distribution
--- Question: What is the distribution of scores across review records?
--- These queries retain multiple reviews per order; counts are not unique reviewed orders.
-
+-- Question: What is the distribution of latest scores across reviewed orders?
+-- Latest answer timestamp wins; review_row_id breaks ties. One observation per order.
+WITH ranked_reviews AS (
+    SELECT r.*, ROW_NUMBER() OVER (
+        PARTITION BY r.order_id
+        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    ) AS review_rank
+    FROM olist_order_reviews_dataset r
+),
+order_reviews AS (
+    SELECT * FROM ranked_reviews WHERE review_rank = 1
+)
 SELECT
     review_score,
     COUNT(*) AS reviews,
@@ -13,14 +20,22 @@ SELECT
         COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (),
         2
     ) AS review_pct
-FROM olist_order_reviews_dataset
+FROM order_reviews
 GROUP BY review_score
 ORDER BY review_score;
 
--- overall average review score
--- Positive = scores 4-5; neutral = 3; negative = 1-2.
--- Percentages use all review records as the denominator.
-
+-- Question: What are overall satisfaction levels?
+-- Positive = 4-5, neutral = 3, negative = 1-2; denominator is reviewed orders.
+WITH ranked_reviews AS (
+    SELECT r.*, ROW_NUMBER() OVER (
+        PARTITION BY r.order_id
+        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    ) AS review_rank
+    FROM olist_order_reviews_dataset r
+),
+order_reviews AS (
+    SELECT * FROM ranked_reviews WHERE review_rank = 1
+)
 SELECT
     COUNT(*) AS total_reviews,
 
@@ -44,13 +59,20 @@ SELECT
         2
     ) AS negative_review_pct
 
-FROM olist_order_reviews_dataset;
+FROM order_reviews;
 
--- Customer Satisfaction over Time
-
--- Monthly review performance
--- Question: How does satisfaction vary by purchase month (not review creation month)?
-
+-- Question: How does satisfaction vary by purchase month?
+-- All statuses; one latest review per order. Month refers to purchase, not review creation.
+WITH ranked_reviews AS (
+    SELECT r.*, ROW_NUMBER() OVER (
+        PARTITION BY r.order_id
+        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    ) AS review_rank
+    FROM olist_order_reviews_dataset r
+),
+order_reviews AS (
+    SELECT * FROM ranked_reviews WHERE review_rank = 1
+)
 SELECT
     DATE_FORMAT(o.order_purchase_timestamp, '%Y-%m') AS purchase_month,
 
@@ -72,7 +94,7 @@ SELECT
 
 FROM olist_orders_dataset o
 
-JOIN olist_order_reviews_dataset r
+JOIN order_reviews r
     ON o.order_id = r.order_id
 
 GROUP BY
@@ -81,10 +103,35 @@ GROUP BY
 ORDER BY
     purchase_month;
 
--- On-Time vs Late Reviews
--- Question: How do review scores differ for delivered orders by delivery outcome?
--- Requires delivery and estimated dates; comparison uses full timestamps.
-
+-- Question: How does satisfaction differ between on-time and late deliveries?
+-- Uses the common complete, chronological delivery population and full timestamp comparison.
+WITH valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+),
+ranked_reviews AS (
+    SELECT r.*, ROW_NUMBER() OVER (
+        PARTITION BY r.order_id
+        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    ) AS review_rank
+    FROM olist_order_reviews_dataset r
+),
+order_reviews AS (
+    SELECT * FROM ranked_reviews WHERE review_rank = 1
+)
 SELECT
     CASE
         WHEN o.order_delivered_customer_date <= o.order_estimated_delivery_date
@@ -108,9 +155,9 @@ SELECT
         2
     ) AS negative_review_pct
 
-FROM olist_orders_dataset o
+FROM valid_deliveries o
 
-JOIN olist_order_reviews_dataset r
+JOIN order_reviews r
     ON o.order_id = r.order_id
 
 WHERE o.order_status = 'delivered'
@@ -124,13 +171,20 @@ GROUP BY
         ELSE 'Late'
     END;
 
--- Rank categories with meaningful volume
--- Question: Which categories have the strongest satisfaction among those with 200+ review rows?
--- Deduplicate order-category pairs before joining reviews to avoid item-level duplication.
--- Multi-category orders contribute reviews to each category; repeated order reviews remain.
--- The volume threshold limits comparisons based on very small samples.
-
-WITH order_categories AS (
+-- Question: Which categories have the strongest satisfaction with 200+ reviewed orders?
+-- Distinct order-category pairs and latest reviews prevent item/review multiplication.
+-- Multi-category orders contribute once to each category; the minimum limits small samples.
+WITH ranked_reviews AS (
+    SELECT r.*, ROW_NUMBER() OVER (
+        PARTITION BY r.order_id
+        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    ) AS review_rank
+    FROM olist_order_reviews_dataset r
+),
+order_reviews AS (
+    SELECT * FROM ranked_reviews WHERE review_rank = 1
+),
+order_categories AS (
     SELECT DISTINCT
         oi.order_id,
         p.product_category_name
@@ -162,7 +216,7 @@ SELECT
 
 FROM order_categories oc
 
-JOIN olist_order_reviews_dataset r
+JOIN order_reviews r
     ON oc.order_id = r.order_id
 
 GROUP BY
@@ -172,3 +226,4 @@ HAVING COUNT(*) >= 200
 
 ORDER BY
     avg_review_score DESC;
+

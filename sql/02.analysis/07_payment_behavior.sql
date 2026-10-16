@@ -1,64 +1,66 @@
--- Payment usage and value, installments, payment complexity, monthly/state patterns and outcomes.
+-- Payment usage, order-level installments and customer outcomes.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
--- 1.Payment Method Usage
--- Question: What percentage of orders with payment records uses each method?
--- An order can use several methods, so method usage percentages can sum above 100.
--- No order-status filter is applied unless a later query explicitly adds one.
-
+-- Question: What share of paid orders uses each defined payment method?
+-- Methods overlap within orders, so usage shares may exceed 100% in total. All statuses.
 SELECT
     payment_type,
     COUNT(DISTINCT order_id) AS orders,
     ROUND(
         COUNT(DISTINCT order_id) * 100.0 /
         (SELECT COUNT(DISTINCT order_id)
-         FROM olist_order_payments_dataset),
+         FROM olist_order_payments_dataset WHERE payment_type <> 'not_defined'),
         2
     ) AS pct_of_orders
 FROM olist_order_payments_dataset
+WHERE payment_type <> 'not_defined'
 GROUP BY payment_type
 ORDER BY orders DESC;
 
--- 2.Revenue/value by payment method
--- Payment-value share uses payment records, not item-price revenue.
-
+-- Question: What share of recorded payment value belongs to each defined method?
+-- Payment values are distinct from item-plus-freight sales; not_defined is excluded.
 SELECT
     payment_type,
     ROUND(SUM(payment_value), 2) AS payment_value,
     ROUND(
         SUM(payment_value) * 100.0 /
         (SELECT SUM(payment_value)
-         FROM olist_order_payments_dataset),
+         FROM olist_order_payments_dataset WHERE payment_type <> 'not_defined'),
         2
     ) AS pct_of_payment_value
 FROM olist_order_payments_dataset
+WHERE payment_type <> 'not_defined'
 GROUP BY payment_type
 ORDER BY payment_value DESC;
 
--- 3.Installment Behavior
 -- Question: How are credit-card orders distributed by installment count?
--- An order with different installment counts on separate records can appear in several groups.
+-- Classify each order once using its maximum recorded installment count.
+-- This describes the longest recorded plan; it is not a single reconstructed repayment schedule.
+WITH credit_card_orders AS (
+    SELECT order_id, MAX(payment_installments) AS payment_installments,
+        SUM(payment_value) AS payment_value
+    FROM olist_order_payments_dataset
+    WHERE payment_type = 'credit_card'
+    GROUP BY order_id
+)
+SELECT payment_installments, COUNT(*) AS orders,
+    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS pct_of_credit_card_orders
+FROM credit_card_orders
+GROUP BY payment_installments ORDER BY payment_installments;
 
-SELECT
-    payment_installments,
-    COUNT(DISTINCT order_id) AS orders,
-    ROUND(
-        COUNT(DISTINCT order_id) * 100.0 /
-        (
-            SELECT COUNT(DISTINCT order_id)
-            FROM olist_order_payments_dataset
-            WHERE payment_type = 'credit_card'
-        ),
-        2
-    ) AS pct_of_credit_card_orders
-FROM olist_order_payments_dataset
-WHERE payment_type = 'credit_card'
-GROUP BY payment_installments
-ORDER BY payment_installments;
-
--- Question: How does payment-record value vary across installment bands?
--- AVG(payment_value) is per payment record, not total order value; zero installments are excluded.
+-- Question: How does credit-card value per order vary across installment bands?
+-- One group per order using maximum installments; sum credit-card payment records first.
+-- Keep unknown/invalid installment orders in a separate group.
+WITH credit_card_orders AS (
+    SELECT order_id, MAX(payment_installments) AS payment_installments,
+        SUM(payment_value) AS payment_value
+    FROM olist_order_payments_dataset
+    WHERE payment_type = 'credit_card'
+    GROUP BY order_id
+)
 SELECT
     CASE
+        WHEN payment_installments IS NULL OR payment_installments <= 0 THEN 'Unknown / invalid'
         WHEN payment_installments = 1 THEN 'Single payment'
         WHEN payment_installments BETWEEN 2 AND 3 THEN 'Short-term (2-3)'
         WHEN payment_installments BETWEEN 4 AND 6 THEN 'Medium-term (4-6)'
@@ -68,12 +70,11 @@ SELECT
 
     COUNT(DISTINCT order_id) AS orders,
 
-    ROUND(AVG(payment_value), 2) AS avg_payment_value
+    ROUND(AVG(payment_value), 2) AS avg_credit_card_value_per_order
 
-FROM olist_order_payments_dataset
+FROM credit_card_orders
 
-WHERE payment_type = 'credit_card'
-    AND payment_installments > 0
+
 
 GROUP BY installment_group
 
@@ -86,10 +87,8 @@ ORDER BY
         WHEN 'Extended (13+)' THEN 5
     END;
 
--- 5.Multiple payment orders
 -- Question: How many payment records does each order have?
--- Multiple records do not necessarily mean multiple distinct payment methods.
-
+-- Multiple records need not mean multiple distinct methods. Includes all recorded types.
 WITH order_payments AS
 (
     SELECT
@@ -111,9 +110,8 @@ FROM order_payments
 GROUP BY payment_count
 ORDER BY payment_count;
 
--- different payment method by order
--- Question: How many distinct payment methods does each order use?
-
+-- Question: How many distinct payment methods does an order use?
+-- Includes all recorded types, including not_defined, for a data-quality-complete count.
 WITH order_payment_methods AS
 (
     SELECT
@@ -136,8 +134,8 @@ FROM order_payment_methods
 GROUP BY payment_methods
 ORDER BY payment_methods;
 
--- Question: How does method usage change by purchase month?
--- Denominator: distinct orders with a defined method in that month; methods can overlap.
+-- Question: How does defined-method usage vary by purchase month?
+-- Denominator: distinct orders with defined payments in each month; methods overlap.
 WITH monthly_payments AS
 (
     SELECT
@@ -180,10 +178,8 @@ ORDER BY
     mp.purchase_month,
     pct_of_monthly_orders DESC;
 
--- 7.Regional payment behavior
--- Question: How does payment-method usage vary by customer state?
--- Denominator: orders with defined payment methods in that state; shares can overlap.
-
+-- Question: How does defined-method usage vary by customer state?
+-- Denominator: distinct orders with defined payments in each state; methods overlap.
 WITH state_payment AS
 (
     SELECT
@@ -257,10 +253,8 @@ GROUP BY
 
 ORDER BY so.total_orders DESC;
 
--- 8.Payment method and Customer satisfaction
--- Question: How much is paid through each method per order?
--- Aggregate payment records to order-method grain before calculating value statistics.
-
+-- Question: What is the value paid through each method per order?
+-- Aggregate records to order-method grain before averaging; excludes not_defined.
 WITH order_payment_type AS
 (
     SELECT
@@ -284,27 +278,26 @@ FROM order_payment_type
 GROUP BY payment_type
 ORDER BY avg_payment_value DESC;
 
--- customer satisfaction with payment method
--- Question: How do review outcomes differ across payment methods?
--- Average reviews to one score per order; negative means that average is <= 2.
--- A mixed-method order contributes to every method it uses; this is an association.
-
-WITH order_payment_method AS
+-- Question: How do review outcomes differ across defined payment methods?
+-- Latest review per order; a mixed-method order contributes to every method it uses.
+-- Associations do not establish an effect of payment choice on satisfaction.
+WITH ranked_reviews AS (
+    SELECT r.*, ROW_NUMBER() OVER (
+        PARTITION BY r.order_id
+        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    ) AS review_rank
+    FROM olist_order_reviews_dataset r
+),
+order_reviews AS (
+    SELECT * FROM ranked_reviews WHERE review_rank = 1
+),
+order_payment_method AS
 (
     SELECT DISTINCT
         order_id,
         payment_type
     FROM olist_order_payments_dataset
     WHERE payment_type <> 'not_defined'
-),
-
-order_reviews AS
-(
-    SELECT
-        order_id,
-        AVG(review_score) AS review_score
-    FROM olist_order_reviews_dataset
-    GROUP BY order_id
 )
 
 SELECT
@@ -339,12 +332,27 @@ GROUP BY p.payment_type
 
 ORDER BY avg_review_score DESC;
 
--- delivery performance
--- Question: How do delivery outcomes differ across payment methods?
--- Uses delivered orders with required dates; elapsed hours / 24 gives days.
--- Timestamp chronology is not validated here; mixed-method orders appear in each method.
-
-WITH order_payment_method AS
+-- Question: How do eligible delivery outcomes differ across payment methods?
+-- Use common chronological delivery eligibility and elapsed seconds / 86400.0.
+-- Mixed-method orders contribute once to each method; lateness compares full timestamps.
+WITH valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+),
+order_payment_method AS
 (
     SELECT DISTINCT
         order_id,
@@ -360,12 +368,11 @@ SELECT
 
     ROUND(
         AVG(
-            TIMESTAMPDIFF(
-                HOUR,
+            TIMESTAMPDIFF(SECOND,
                 o.order_purchase_timestamp,
                 o.order_delivered_customer_date
             )
-        ) / 24,
+        ) / 86400.0,
         2
     ) AS avg_delivery_days,
 
@@ -383,7 +390,7 @@ SELECT
 
 FROM order_payment_method p
 
-JOIN olist_orders_dataset o
+JOIN valid_deliveries o
     ON p.order_id = o.order_id
 
 WHERE o.order_status = 'delivered'
@@ -394,3 +401,4 @@ WHERE o.order_status = 'delivered'
 GROUP BY p.payment_type
 
 ORDER BY avg_delivery_days;
+

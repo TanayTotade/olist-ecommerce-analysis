@@ -64,6 +64,8 @@ Repeat purchasing, customer segments, cohort retention, and payment-method usage
 
 ## 6. Key findings
 
+**Dashboard snapshot:** The figures and dashboard files below reflect the earlier validated MySQL import. Revised SQL standardizes review handling, delivery eligibility, seller dispatch and cohort coverage. Rebuild the views and refresh Tableau before presenting the workbook as an output of the revised SQL; seller-risk and delay-impact results can change.
+
 | Finding | Business interpretation |
 | --- | --- |
 | Dashboard sales value totals **R$15.84 million**, with **99,441 orders** and **R$160.58 average order value**. | Establishes the marketplace's commercial baseline. Sales value includes freight; AOV covers orders with item value. |
@@ -73,7 +75,7 @@ Repeat purchasing, customer segments, cohort retention, and payment-method usage
 | Earlier validated delivery/review comparisons show average scores of approximately **4.29 for on-time/early orders** and **2.57 for late orders**. | Delivery delays are associated with a substantial deterioration in customer satisfaction. Exact results depend on the review and lateness convention used. |
 | Credit cards are used on approximately **76.94%** of paid orders, followed by boleto at **19.90%**. | Credit cards dominate payment usage. Orders can use multiple methods, so usage percentages are not mutually exclusive. |
 
-These findings use the project's dashboard definitions and validated analysis results. Supporting exploratory queries sometimes use different populations or calculations; see [metric definitions](docs/metric_definitions.md) before comparing results across scripts.
+These are historical dashboard findings, not a claim that every figure has been regenerated from the revised scripts. Product-only revenue, comment records and exploratory fixed-threshold risk comparisons remain explicitly distinct; see [metric definitions](docs/metric_definitions.md).
 
 ## 7. Recommendations
 
@@ -90,7 +92,7 @@ These are proposed actions based on historical patterns; their business impact h
 
 | Path | Contents |
 | --- | --- |
-| [sql/01.setup/](sql/01.setup/) | Original CSV import statements; source tables must already exist |
+| [sql/01.setup/](sql/01.setup/) | Source schema followed by CSV import statements |
 | [sql/02.analysis/](sql/02.analysis/) | Eleven scripts covering sales, customers, cohorts, categories, delivery, satisfaction, payments, sellers, regions, review themes, and cross-dimensional insights |
 | [sql/03.validation/](sql/03.validation/) | Row-count, relationship, and data-coverage checks |
 | [sql/04.views/](sql/04.views/) | Four ordered scripts defining the fourteen Tableau analytical views |
@@ -100,8 +102,8 @@ These are proposed actions based on historical patterns; their business impact h
 ## 9. How to reproduce
 
 1. **Download the data** from the linked Olist dataset and extract the CSV files.
-2. **Prepare MySQL 8.0+** and select a project database in MySQL Workbench. The repository contains import statements, but does **not** currently include the `CREATE TABLE` schema. Rebuilding therefore requires creating the nine source tables first, including the `review_row_id` surrogate column used by review-ranking views.
-3. **Import the CSVs** using [01_import_data.sql](sql/01.setup/01_import_data.sql). Replace the local Windows paths, check CSV newline settings, and configure `LOCAL INFILE` as needed. Import each source file once and inspect import warnings.
+2. **Prepare MySQL 8.0+** and run [01_create_schema.sql](sql/01.setup/01_create_schema.sql) in a new database. It creates the nine source tables, including the `review_row_id` surrogate column used by review-ranking queries. Existing tables are not dropped or replaced.
+3. **Import the CSVs** using [02_import_data.sql](sql/01.setup/02_import_data.sql). Replace the local Windows paths, check CSV newline settings, and configure `LOCAL INFILE` as needed. Import each source file once and inspect import warnings.
 4. **Validate the data** using [01_data_validation.sql](sql/03.validation/01_data_validation.sql). Review counts, missing relationships, and coverage before analyzing results.
 5. **Explore the analysis scripts** in `sql/02.analysis/`. These operate on the source tables and can be run independently of the dashboard views.
 6. **Create the dashboard views** by running the four files in `sql/04.views/` in numeric order. The seller-performance view must exist before `vw_kpis` is created.
@@ -111,14 +113,15 @@ The import SQL preserves the original workflow and is not a complete automated i
 
 ## 10. Methodology and limitations
 
-- **Sales definition:** Final dashboard revenue is `SUM(price + freight_value)` across all order statuses. It represents item sales value plus freight, rather than profit or Olist's own platform revenue. Supporting sales queries may use item price alone or restrict statuses. AOV averages non-null order-level item-plus-freight values, so its denominator differs from the total order count.
-- **Customer identity:** Customer-level retention and segmentation use `customer_unique_id`. The category sales view retains `customer_id`, which represents an order-specific customer record; its customer counts should not be interpreted as distinct people across purchases.
+- **Sales definition:** Final dashboard revenue is `SUM(price + freight_value)` across all order statuses. It represents item sales value plus freight, rather than profit or Olist's own platform revenue. Product/category supporting queries explicitly label item-price-only values as product revenue; general sales and customer summaries use all statuses. AOV averages non-null order-level item-plus-freight values, so its denominator differs from the total order count.
+- **Customer identity:** Customer-level retention and segmentation use `customer_unique_id`. The category sales view also counts distinct `customer_unique_id` values, so its customer measure represents people across purchases.
 - **Join grain:** One-to-many relationships require aggregation or deduplication before combining measures. Orders spanning multiple categories or sellers can appear in multiple groups; group-level distinct counts are not additive.
-- **Delivery population:** Final delivery KPIs require complete timestamps in chronological order. This yields 95,082 valid delivered orders. Review and seller views may use broader populations. Timestamp-based lateness and calendar-day `DATEDIFF` buckets can classify boundary cases differently.
-- **Review handling:** KPI, state, review, and seller dashboard views select the latest review answer per order, using descending `review_row_id` as a tie-breaker. Delay and other impact views average review scores per order. Supporting queries may retain original review rows. Negative reviews generally mean scores 1–2, neutral 3, and positive 4–5.
+- **Delivery population:** Final delivery KPIs require complete timestamps in chronological order. The historical import yields 95,082 valid delivered orders. Operational comparisons and impact views use that eligibility rule and full timestamp lateness. The delivery-time distribution alone uses explicitly labelled calendar-day bands. Reviews outside operational comparisons can cover broader populations.
+- **Review handling:** KPI, state, review, and seller dashboard views select the latest review answer per order, using descending `review_row_id` as a tie-breaker. Order-level supporting and impact queries now use the same latest-review convention. Original review rows remain only for comment-record exploration. Negative reviews generally mean scores 1–2, neutral 3, and positive 4–5.
 - **Risk screening:** Seller-risk segments use comparisons against seller averages. They are investigation heuristics, not validated predictive models or proof of seller responsibility.
 - **Retention window:** Repeat purchasing and cohorts describe activity observed in this dataset. Later cohorts have shorter follow-up periods; unobserved future months must not be treated as zero retention. Endpoint months also have limited sales coverage.
 - **Payment and text analysis:** Payment-method usage can total more than 100% because orders can use several methods. Review-comment themes use overlapping Portuguese keyword/regex rules and are not validated sentiment analysis.
 - **Interpretation:** Findings describe historical associations. They do not establish that delays, sellers, payment choices, or categories caused the observed review outcomes.
 
-See [metric_definitions.md](docs/metric_definitions.md) for the detailed differences preserved in the original SQL.
+See [metric_definitions.md](docs/metric_definitions.md) for revised calculation rules, intentional exploratory differences and refresh requirements.
+

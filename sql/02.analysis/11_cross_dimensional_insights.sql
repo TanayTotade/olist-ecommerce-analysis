@@ -1,16 +1,39 @@
--- Original single-seller and single-category risk comparisons; definitions differ from dashboard risk views.
+-- Exploratory on-time complaint risk comparisons at unique reviewed-order grain.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
--- Original SQL retained without logic changes. See docs/query_provenance.md.
-
--- Defining Risky Sellers
--- Question: Does negative feedback persist for risky sellers even on on-time deliveries?
--- Restrict to single-seller orders to make seller attribution unambiguous.
--- Risk uses on-time review rows: 50+ required and >=15% negative (scores 1-2).
--- Direct review joins preserve multiple reviews per order despite order-based output aliases.
--- These are descriptive thresholds, not a predictive model or evidence of causation.
--- Final comparison excludes insufficient history; NULL estimates fall into the on-time ELSE branch.
-
-WITH single_seller_orders AS (
+-- Question: Does negative feedback persist for sellers even when delivery is on time?
+-- Single-seller eligible deliveries; one latest review per order.
+-- Risk: 50+ on-time reviewed orders and at least 15% negative; exclude insufficient history.
+-- This exploratory threshold differs intentionally from the dashboard seller-risk heuristic.
+-- Classification and comparison use the same historical sample; this is not predictive validation.
+WITH valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+),
+ranked_reviews AS (
+    SELECT r.*, ROW_NUMBER() OVER (
+        PARTITION BY r.order_id
+        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    ) AS review_rank
+    FROM olist_order_reviews_dataset r
+),
+order_reviews AS (
+    SELECT * FROM ranked_reviews WHERE review_rank = 1
+),
+single_seller_orders AS (
     SELECT
         order_id,
         MIN(seller_id) AS seller_id
@@ -23,7 +46,7 @@ seller_performance AS (
     SELECT
         sso.seller_id,
 
-        COUNT(*) AS on_time_orders,
+        COUNT(*) AS on_time_reviewed_orders,
 
         SUM(
             CASE
@@ -34,10 +57,10 @@ seller_performance AS (
 
     FROM single_seller_orders sso
 
-    JOIN olist_orders_dataset o
+    JOIN valid_deliveries o
         ON sso.order_id = o.order_id
 
-    JOIN olist_order_reviews_dataset r
+    JOIN order_reviews r
         ON o.order_id = r.order_id
 
     WHERE o.order_status = 'delivered'
@@ -53,11 +76,11 @@ seller_risk AS (
         seller_id,
 
         CASE
-            WHEN on_time_orders < 50
+            WHEN on_time_reviewed_orders < 50
                 THEN 'Insufficient history'
 
             WHEN 100.0 * on_time_negative_reviews /
-                 on_time_orders >= 15
+                 on_time_reviewed_orders >= 15
                 THEN 'Risky seller'
 
             ELSE 'Normal seller'
@@ -88,10 +111,10 @@ order_base AS (
 
     FROM single_seller_orders sso
 
-    JOIN olist_orders_dataset o
+    JOIN valid_deliveries o
         ON sso.order_id = o.order_id
 
-    JOIN olist_order_reviews_dataset r
+    JOIN order_reviews r
         ON o.order_id = r.order_id
 
     JOIN seller_risk sr
@@ -132,13 +155,39 @@ ORDER BY
         WHEN 'Risky seller' THEN 2
     END;
 
--- Delivery Category Risk
 -- Question: How do delivery outcome and category risk relate to negative feedback?
--- Keep orders with exactly one known, nonblank category after filtering item categories.
--- Risk uses on-time review rows: 100+ required and >=12% negative.
--- Counts remain at review-record grain; final results omit insufficient-history categories.
-
-WITH single_category_orders AS (
+-- Only orders where every item resolves to one known, nonblank category.
+-- Latest reviews and common eligible deliveries; require 100+ on-time reviewed orders.
+-- High risk means >=12% on-time negative reviews, distinct from the dashboard category heuristic.
+-- Descriptive same-sample associations do not establish causation.
+WITH valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+),
+ranked_reviews AS (
+    SELECT r.*, ROW_NUMBER() OVER (
+        PARTITION BY r.order_id
+        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    ) AS review_rank
+    FROM olist_order_reviews_dataset r
+),
+order_reviews AS (
+    SELECT * FROM ranked_reviews WHERE review_rank = 1
+),
+single_category_orders AS (
     SELECT
         oi.order_id,
         MIN(p.product_category_name) AS product_category_name
@@ -154,13 +203,15 @@ WITH single_category_orders AS (
     GROUP BY oi.order_id
 
     HAVING COUNT(DISTINCT p.product_category_name) = 1
+       AND COUNT(*) = (SELECT COUNT(*) FROM olist_order_items_dataset all_items
+                       WHERE all_items.order_id = oi.order_id)
 ),
 
 category_performance AS (
     SELECT
         sco.product_category_name,
 
-        COUNT(*) AS on_time_orders,
+        COUNT(*) AS on_time_reviewed_orders,
 
         SUM(
             CASE
@@ -171,10 +222,10 @@ category_performance AS (
 
     FROM single_category_orders sco
 
-    JOIN olist_orders_dataset o
+    JOIN valid_deliveries o
         ON sco.order_id = o.order_id
 
-    JOIN olist_order_reviews_dataset r
+    JOIN order_reviews r
         ON o.order_id = r.order_id
 
     WHERE o.order_status = 'delivered'
@@ -191,11 +242,11 @@ category_risk AS (
         product_category_name,
 
         CASE
-            WHEN on_time_orders < 100
+            WHEN on_time_reviewed_orders < 100
                 THEN 'Insufficient history'
 
             WHEN 100.0 * on_time_negative_reviews /
-                 on_time_orders >= 12
+                 on_time_reviewed_orders >= 12
                 THEN 'High-risk category'
 
             ELSE 'Normal category'
@@ -226,10 +277,10 @@ order_base AS (
 
     FROM single_category_orders sco
 
-    JOIN olist_orders_dataset o
+    JOIN valid_deliveries o
         ON sco.order_id = o.order_id
 
-    JOIN olist_order_reviews_dataset r
+    JOIN order_reviews r
         ON o.order_id = r.order_id
 
     JOIN category_risk cr
@@ -272,3 +323,4 @@ ORDER BY
         WHEN 'Normal category' THEN 1
         WHEN 'High-risk category' THEN 2
     END;
+

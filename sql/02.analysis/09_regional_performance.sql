@@ -1,21 +1,19 @@
--- Regional concentration, purchasing behavior and delivery performance.
+-- Regional sales concentration and purchasing behavior; duplicate delivery query consolidated.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
--- cumulative revenue concentration by state
--- Question: How concentrated are product sales across customer states?
--- Excludes canceled/unavailable orders; revenue excludes freight.
--- Aggregate items to one order before counting orders and calculating state shares.
-
+-- Question: How concentrated is item-plus-freight sales value across customer states?
+-- All statuses; retain orders without items in counts, with zero sales contribution.
 WITH order_revenue AS (
     SELECT
         o.order_id,
         c.customer_state,
-        SUM(oi.price) AS order_revenue
+        SUM(oi.price + oi.freight_value) AS order_revenue
     FROM olist_orders_dataset AS o
     JOIN olist_customers_dataset AS c
         ON o.customer_id = c.customer_id
-    JOIN olist_order_items_dataset AS oi
+    LEFT JOIN olist_order_items_dataset AS oi
         ON o.order_id = oi.order_id
-    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    
     GROUP BY
         o.order_id,
         c.customer_state
@@ -25,7 +23,7 @@ state_revenue AS (
     SELECT
         customer_state,
         COUNT(*) AS total_orders,
-        SUM(order_revenue) AS revenue
+        SUM(COALESCE(order_revenue, 0)) AS revenue
     FROM order_revenue
     GROUP BY customer_state
 ),
@@ -59,22 +57,22 @@ SELECT
 FROM state_metrics
 ORDER BY revenue DESC;
 
--- regional purchasing behavior
--- Question: How do order frequency and spending differ by customer state?
--- Uses the same sales scope; customer_unique_id identifies distinct people within each state.
-
+-- Question: How do customer frequency and spending differ by state?
+-- All statuses; distinct people within each state. Revenue includes freight.
+-- AOV excludes missing item values; orders-per-customer retains all orders.
+-- See 05_delivery_performance.sql for the single authoritative supporting state-delivery query.
 WITH order_revenue AS (
     SELECT
         o.order_id,
         c.customer_unique_id,
         c.customer_state,
-        SUM(oi.price) AS order_revenue
+        SUM(oi.price + oi.freight_value) AS order_revenue
     FROM olist_orders_dataset AS o
     JOIN olist_customers_dataset AS c
         ON o.customer_id = c.customer_id
-    JOIN olist_order_items_dataset AS oi
+    LEFT JOIN olist_order_items_dataset AS oi
         ON o.order_id = oi.order_id
-    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    
     GROUP BY
         o.order_id,
         c.customer_unique_id,
@@ -86,7 +84,8 @@ state_behavior AS (
         customer_state,
         COUNT(DISTINCT customer_unique_id) AS customers,
         COUNT(*) AS orders,
-        SUM(order_revenue) AS revenue
+        AVG(order_revenue) AS avg_item_order_value,
+        SUM(COALESCE(order_revenue, 0)) AS revenue
     FROM order_revenue
     GROUP BY customer_state
 )
@@ -108,57 +107,10 @@ SELECT
     ) AS revenue_per_customer,
 
     ROUND(
-        revenue / orders,
+        avg_item_order_value,
         2
     ) AS avg_order_value
 
 FROM state_behavior
 ORDER BY revenue_per_customer DESC;
 
--- delivery performance by state
--- Question: Which states have slower or less reliable delivered orders?
--- Requires purchase, delivery and estimate timestamps; no chronology check is applied.
--- Elapsed whole hours / 24 gives days; lateness compares full timestamps.
-
-SELECT
-    c.customer_state,
-
-    COUNT(*) AS delivered_orders,
-
-    ROUND(
-        AVG(
-            TIMESTAMPDIFF(
-                HOUR,
-                o.order_purchase_timestamp,
-                o.order_delivered_customer_date
-            )
-        ) / 24,
-        2
-    ) AS avg_delivery_days,
-
-    SUM(
-        o.order_delivered_customer_date >
-        o.order_estimated_delivery_date
-    ) AS late_orders,
-
-    ROUND(
-        SUM(
-            o.order_delivered_customer_date >
-            o.order_estimated_delivery_date
-        ) * 100.0 / COUNT(*),
-        2
-    ) AS late_delivery_pct
-
-FROM olist_orders_dataset AS o
-
-JOIN olist_customers_dataset AS c
-    ON o.customer_id = c.customer_id
-
-WHERE o.order_status = 'delivered'
-  AND o.order_purchase_timestamp IS NOT NULL
-  AND o.order_delivered_customer_date IS NOT NULL
-  AND o.order_estimated_delivery_date IS NOT NULL
-
-GROUP BY c.customer_state
-
-ORDER BY avg_delivery_days DESC;

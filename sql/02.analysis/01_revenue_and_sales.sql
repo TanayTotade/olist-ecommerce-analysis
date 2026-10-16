@@ -1,28 +1,35 @@
--- Product-only sales baseline and monthly revenue trend.
+-- Sales baseline and monthly trend aligned with dashboard sales definitions.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
+-- Question: What are total sales, their components, and average order value?
+-- All order statuses; total revenue includes freight. AOV excludes missing item values.
+WITH order_revenue AS (
+    SELECT order_id, SUM(price) AS product_revenue,
+        SUM(freight_value) AS freight_revenue,
+        SUM(price + freight_value) AS order_revenue
+    FROM olist_order_items_dataset GROUP BY order_id
+)
+SELECT COUNT(*) AS total_orders,
+    COUNT(r.order_revenue) AS orders_with_item_value,
+    ROUND(SUM(r.product_revenue), 2) AS product_revenue,
+    ROUND(SUM(r.freight_revenue), 2) AS freight_revenue,
+    ROUND(SUM(r.order_revenue), 2) AS total_revenue,
+    ROUND(AVG(r.order_revenue), 2) AS average_order_value
+FROM olist_orders_dataset o
+LEFT JOIN order_revenue r ON o.order_id = r.order_id;
 
--- Revenue Baseline
--- Question: What are product sales and average value per order with items?
--- SUM(price) excludes freight; no order-status filter is applied.
--- Distinct order IDs prevent multiple items from inflating the AOV denominator.
-SELECT
-    ROUND(SUM(price), 2) AS total_revenue,
-    COUNT(DISTINCT order_id) AS orders_with_items,
-    ROUND(
-        SUM(price) / COUNT(DISTINCT order_id),
-        2
-    ) AS average_order_value
-FROM olist_order_items_dataset;
-
--- Monthly_revenue_trend
--- Question: How do product sales change by purchase month?
--- Only orders with matching item records contribute; missing months are not filled.
-SELECT
-    DATE_FORMAT(o.order_purchase_timestamp, '%Y-%m') AS month,
-    ROUND(SUM(oi.price), 2) AS revenue,
-    COUNT(DISTINCT o.order_id) AS orders
-FROM olist_orders_dataset AS o
-JOIN olist_order_items_dataset AS oi
-    ON o.order_id = oi.order_id
+-- Question: How do sales change by purchase month?
+-- Orders without items remain in order counts and contribute zero revenue, but not to AOV.
+WITH order_revenue AS (
+    SELECT order_id, SUM(price + freight_value) AS order_revenue
+    FROM olist_order_items_dataset GROUP BY order_id
+)
+SELECT DATE_FORMAT(o.order_purchase_timestamp, '%Y-%m') AS month,
+    COUNT(*) AS orders,
+    ROUND(SUM(COALESCE(r.order_revenue, 0)), 2) AS revenue,
+    ROUND(AVG(r.order_revenue), 2) AS average_order_value
+FROM olist_orders_dataset o
+LEFT JOIN order_revenue r ON o.order_id = r.order_id
 GROUP BY DATE_FORMAT(o.order_purchase_timestamp, '%Y-%m')
 ORDER BY month;
+

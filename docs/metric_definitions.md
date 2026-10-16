@@ -1,32 +1,33 @@
-# Original metric definitions
+# Metric definitions
 
-This describes the submitted queries as retained. Differences are documented, not corrected.
+These definitions apply to the revised SQL. Rebuild views in filename order before refreshing Tableau extracts. Existing screenshots and workbook extracts are not recalculated by editing SQL.
 
-| Area | Original definition / caveat |
+| Area | Definition |
 | --- | --- |
-| Sales baseline and regional/product supporting analysis | Generally item price only (`SUM(price)`); some queries restrict order statuses |
-| Final dashboard sales/KPIs | Item price plus freight; all order statuses; AOV excludes orders without item value |
-| Distinct people | Most customer analysis uses `customer_unique_id`; category sales view uses `customer_id`, an order-specific record |
-| Customer value / repeat-purchase supporting analysis | Delivered orders; spend bands include freight |
-| Dashboard customer segments/retention/cohorts | All orders; cohort/retention views require purchase timestamps |
-| Supporting cohort analysis | Delivered-order acquisition and activity; differs from dashboard cohort view |
-| Review satisfaction supporting analysis | Usually original review rows; repeated order reviews can affect counts |
-| Dashboard KPI/state/review/seller views | Latest answer timestamp per order, tied by descending `review_row_id` |
-| Dashboard delay/seller/category impact views | Average review score per order; differs from the latest-review convention |
-| Supporting delivery lateness/buckets | Often calendar-day DATEDIFF |
-| Final delivery/state/KPI lateness | Timestamp comparison, with fractional-day stage durations and chronology validation |
-| Aggregate delay impact view | Calendar-day DATEDIFF buckets and averaged per-order review scores |
-| Order-level delivery/review delay buckets | Timestamp intervals divided by 86400 |
-| Supporting operational dispatch | Approval to carrier handoff |
-| Final seller-view dispatch | Purchase to carrier handoff; not equivalent to operational dispatch |
-| Final seller risk | At least four adverse comparisons against five unweighted seller averages, including low order count |
-| Supporting seller performance | Minimum 50 seller/orders; supporting concentration uses item price only |
-| Cross-dimensional seller risk | At least 50 on-time orders; on-time negative-review rate >=15%; distinct from dashboard risk heuristic |
-| Cross-dimensional category risk | Original on-time negative-rate threshold and history rule in the retained statement; not interchangeable with final category-risk view |
-| Review comment tagging | Eight overlapping Portuguese regex themes over negative original review rows with comments; not validated sentiment analysis |
-| Payment usage | Distinct orders using each method; shares may exceed 100% across methods |
-| Payment average | Depends on the query: record-level average or sum by order/method before averaging |
+| Total revenue / sales | Item price plus freight, all order statuses; a historical sales-value measure, not profit or settled receipts |
+| Product revenue | Item price only; retained explicitly for product/category composition and freight comparisons |
+| Order counts | All orders, including orders with no item rows; category and seller counts necessarily require an associated item |
+| AOV | Average item-plus-freight value per order with an item value; orders lacking item value are excluded from AOV, not from total order counts |
+| Distinct people | `customer_unique_id`, including category customer counts |
+| Customer segments / purchase progression / cohorts | All order statuses; timing analyses require a purchase timestamp; order ID breaks timestamp ties |
+| Cohort months | Acquisition is first purchase month; a person is counted once per activity month; observed zero-activity months are explicit zero; future months are absent |
+| Observation end | Latest purchase month in the extract; partial endpoint months must not be treated as complete calendar coverage |
+| Review satisfaction | One latest review per order, ordered by answer timestamp descending then `review_row_id` descending; negative 1-2, neutral 3, positive 4-5 |
+| Delivery eligibility | Delivered orders with purchase, approval, carrier, customer-delivery and estimate timestamps; purchase <= approval <= carrier <= customer delivery |
+| Lateness | Full delivery timestamp > estimated delivery timestamp; a positive fraction of a day is late, including later on the same calendar date |
+| Elapsed durations | Seconds / 86400.0; approval: purchase to approval, dispatch: approval to carrier, shipping: carrier to customer |
+| Delivery-time distribution | Calendar-day DATEDIFF bands, explicitly distinct from fractional elapsed stage averages |
+| Delay buckets | On time if <=0 elapsed days versus estimate; then (0,3], (3,7], (7,14], >14. Tableau field labels are retained; labels include fractional-day boundaries |
+| Seller comparison | Commercial totals across all seller orders; delivery averages use eligible deliveries; review averages use latest reviewed orders; supporting table requires >=50 orders |
+| Dashboard seller risk | Four or more adverse comparisons against five unweighted seller averages, including low order count; a descriptive heuristic, not validated prediction |
+| Exploratory seller/category risk | Negative feedback on on-time deliveries: seller >=50 reviewed orders and >=15% negative; category >=100 and >=12%; intentionally distinct from dashboard classifications |
+| Dashboard category risk | Category latest-review negative rate above marketplace latest-review negative rate; no minimum-history rule |
+| Single-category attribution | Every item must resolve to the same known, nonblank category; mixed/unknown-category orders are excluded |
+| Comment themes | Original nonblank negative review records, not latest-order reviews; eight overlapping Portuguese keyword rules; matching coverage is not accuracy |
+| Payment usage | Distinct orders using a defined method; mixed-method orders appear in each method, so shares can sum above 100% |
+| Payment value | Recorded payments, separate from item-based sales; averages use summed values per order-method |
+| Installment classification | Each credit-card order appears once using its maximum recorded installment count; payment values sum all its credit-card records; nonpositive/missing counts are unknown |
 
-Multi-category and multi-seller orders can appear in several groups. Do not add their distinct counts as though groups were mutually exclusive. Missing cohort-view cells are sparse observations; distinguish no activity from months outside the observation period. Dataset endpoint months have limited sales coverage.
+Amounts are historical BRL. Multi-category and multi-seller counts overlap and must not be added as mutually exclusive groups. Orders without reviews or eligible deliveries remain in commercial totals but not the corresponding averages. Complaint and risk comparisons describe historical associations, not causal effects. Fixed exploratory risk thresholds and dashboard risk heuristics answer different questions and must not be presented as interchangeable.
 
-Amounts represent historical BRL values. Sales value, payment value, and profit are distinct; profit cannot be derived without costs. Negative reviews generally mean scores 1–2, neutral 3, and positive 4–5, but averaged scores may be fractional. Risk and delay comparisons describe historical associations, not causal effects.
+The raw attached CSV and the user's historical MySQL import differ slightly in review-row counts. Validate final numbers against the intended import; fixture results are not replacements for the published KPIs.

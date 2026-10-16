@@ -1,8 +1,7 @@
--- Fulfillment, delivery distribution, stages, state/month patterns and review score distribution.
+-- Fulfillment and delivery analysis with shared chronological eligibility and timestamp lateness.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
--- Order status and fulfillment rate
--- Question: What share of all orders is in each fulfillment status?
-
+-- Question: What proportion of all orders is in each status?
 SELECT
     order_status,
     COUNT(*) AS total_orders,
@@ -14,19 +13,34 @@ FROM olist_orders_dataset
 GROUP BY order_status
 ORDER BY total_orders DESC;
 
--- delivery time distribution
--- Question: How are eligible delivered orders distributed across delivery-time bands?
--- DATEDIFF uses calendar days; exclude missing delivery dates and delivery before purchase.
--- Percentages use only orders surviving these filters.
-
-WITH delivery_times AS (
+-- Question: How are eligible orders distributed across calendar-day delivery bands?
+-- All delivery queries below require complete, chronological stage dates and an estimate.
+-- The distribution uses DATEDIFF calendar days; elapsed stage averages use fractional days.
+WITH valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+),
+delivery_times AS (
     SELECT
         order_id,
         DATEDIFF(
             order_delivered_customer_date,
             order_purchase_timestamp
         ) AS delivery_days
-    FROM olist_orders_dataset
+    FROM valid_deliveries
     WHERE order_status = 'delivered'
       AND order_delivered_customer_date IS NOT NULL
       AND order_delivered_customer_date >= order_purchase_timestamp
@@ -61,12 +75,27 @@ FROM delivery_bands
 GROUP BY delivery_band, band_order
 ORDER BY band_order;
 
--- Approval, Dispatch and Shipping Duration
--- Question: Which fulfillment stage accounts for elapsed delivery time?
--- Require all stage timestamps in chronological order to avoid negative durations.
--- Seconds / 86400.0 preserves fractional days; all stage averages use the same orders.
-
-WITH fulfillment_durations AS (
+-- Question: Which stage accounts for delivery time?
+-- Approval: purchase to approval; dispatch: approval to carrier; shipping: carrier to customer.
+-- Seconds / 86400.0 preserves fractional days; all stages share one eligible population.
+WITH valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+),
+fulfillment_durations AS (
     SELECT
         order_id,
 
@@ -88,7 +117,7 @@ WITH fulfillment_durations AS (
             order_delivered_customer_date
         ) / 86400.0 AS shipping_days
 
-    FROM olist_orders_dataset
+    FROM valid_deliveries
     WHERE order_status = 'delivered'
       AND order_purchase_timestamp IS NOT NULL
       AND order_approved_at IS NOT NULL
@@ -112,17 +141,31 @@ SELECT
     ) AS avg_total_delivery_days
 FROM fulfillment_durations;
 
--- Question: Which fulfillment stages differ between on-time and late deliveries?
--- Reuses chronological stage eligibility and also requires an estimated delivery date.
-WITH fulfillment_durations AS (
+-- Question: Which stages differ between on-time and late deliveries?
+-- Late means delivery timestamp exceeds estimate; any positive fraction is late.
+WITH valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+),
+fulfillment_durations AS (
     SELECT
         order_id,
 
         CASE
-            WHEN DATEDIFF(
-                order_delivered_customer_date,
-                order_estimated_delivery_date
-            ) <= 0 THEN 'On time'
+            WHEN TIMESTAMPDIFF(SECOND, order_estimated_delivery_date, order_delivered_customer_date) / 86400.0 <= 0 THEN 'On time'
             ELSE 'Late'
         END AS delivery_performance,
 
@@ -144,7 +187,7 @@ WITH fulfillment_durations AS (
             order_delivered_customer_date
         ) / 86400.0 AS shipping_days
 
-    FROM olist_orders_dataset
+    FROM valid_deliveries
     WHERE order_status = 'delivered'
       AND order_purchase_timestamp IS NOT NULL
       AND order_approved_at IS NOT NULL
@@ -168,14 +211,28 @@ SELECT
     ) AS avg_total_delivery_days
 FROM fulfillment_durations
 GROUP BY delivery_performance
-ORDER BY FIELD(delivery_performance, 'On time', 'Late');
+ORDER BY CASE delivery_performance WHEN 'On time' THEN 1 ELSE 2 END;
 
--- Delivery performance by state
--- Question: How do delivery speed and lateness vary by customer state?
--- Late means a positive calendar-day difference from the estimate.
--- avg_days_late excludes on-time orders; late_delivery_pct includes all eligible orders.
-
-WITH state_delivery AS (
+-- Question: How do speed and lateness vary by customer state?
+-- Lateness uses fractional days; avg_days_late includes only late orders.
+WITH valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+),
+state_delivery AS (
     SELECT
         o.order_id,
         c.customer_state,
@@ -186,12 +243,9 @@ WITH state_delivery AS (
             o.order_delivered_customer_date
         ) / 86400.0 AS delivery_days,
 
-        DATEDIFF(
-            o.order_delivered_customer_date,
-            o.order_estimated_delivery_date
-        ) AS days_vs_estimate
+        TIMESTAMPDIFF(SECOND, o.order_estimated_delivery_date, o.order_delivered_customer_date) / 86400.0 AS days_vs_estimate
 
-    FROM olist_orders_dataset AS o
+    FROM valid_deliveries AS o
     JOIN olist_customers_dataset AS c
         ON o.customer_id = c.customer_id
 
@@ -229,11 +283,26 @@ FROM state_delivery
 GROUP BY customer_state
 ORDER BY late_delivery_pct DESC, delivered_orders DESC;
 
--- monthly delivery performance
 -- Question: How does delivery performance vary by purchase month?
--- Group by purchase month, not delivery month; eligibility follows this query's filters.
-
-WITH delivery_metrics AS (
+-- Month refers to purchase, not delivery; uses the shared eligible delivery population.
+WITH valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+),
+delivery_metrics AS (
     SELECT
         order_id,
         DATE_FORMAT(
@@ -246,12 +315,9 @@ WITH delivery_metrics AS (
             order_delivered_customer_date
         ) / 86400.0 AS delivery_days,
 
-        DATEDIFF(
-            order_delivered_customer_date,
-            order_estimated_delivery_date
-        ) AS days_vs_estimate
+        TIMESTAMPDIFF(SECOND, order_estimated_delivery_date, order_delivered_customer_date) / 86400.0 AS days_vs_estimate
 
-    FROM olist_orders_dataset
+    FROM valid_deliveries
     WHERE order_status = 'delivered'
       AND order_purchase_timestamp IS NOT NULL
       AND order_delivered_customer_date IS NOT NULL
@@ -286,11 +352,26 @@ FROM delivery_metrics
 GROUP BY purchase_month
 ORDER BY purchase_month;
 
--- monthly approval, dispatch and shipping duration
--- Question: How do stage durations compare for purchases in February-June 2018?
--- This focused date window is narrower than the full-period analyses above.
-
-WITH monthly_durations AS (
+-- Question: How do stages compare for purchases in February-June 2018?
+-- Retained as a focused supporting window; it does not represent the full dataset period.
+WITH valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+),
+monthly_durations AS (
     SELECT
         DATE_FORMAT(
             order_purchase_timestamp, '%Y-%m'
@@ -314,7 +395,7 @@ WITH monthly_durations AS (
             order_delivered_customer_date
         ) / 86400.0 AS shipping_days
 
-    FROM olist_orders_dataset
+    FROM valid_deliveries
     WHERE order_status = 'delivered'
       AND order_purchase_timestamp >= '2018-02-01'
       AND order_purchase_timestamp < '2018-07-01'
@@ -343,12 +424,35 @@ FROM monthly_durations
 GROUP BY purchase_month
 ORDER BY purchase_month;
 
--- review score distribution
--- Question: How does the review-score mix differ between delivery outcomes?
--- Counts review records, so an order with multiple reviews contributes multiple rows.
--- Percentages sum to 100 within each delivery status.
--- This query compares full timestamps; earlier DATEDIFF comparisons use calendar dates.
-
+-- Question: How does the latest review-score mix differ by delivery status?
+-- One review per eligible order; percentages sum to 100 within each status.
+WITH ranked_reviews AS (
+    SELECT r.*, ROW_NUMBER() OVER (
+        PARTITION BY r.order_id
+        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    ) AS review_rank
+    FROM olist_order_reviews_dataset r
+),
+order_reviews AS (
+    SELECT * FROM ranked_reviews WHERE review_rank = 1
+),
+valid_deliveries AS (
+    SELECT o.*,
+        TIMESTAMPDIFF(SECOND, o.order_approved_at,
+            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 END AS is_late
+    FROM olist_orders_dataset o
+    WHERE o.order_status = 'delivered'
+      AND o.order_purchase_timestamp IS NOT NULL
+      AND o.order_approved_at IS NOT NULL
+      AND o.order_delivered_carrier_date IS NOT NULL
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND o.order_approved_at >= o.order_purchase_timestamp
+      AND o.order_delivered_carrier_date >= o.order_approved_at
+      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
+)
 SELECT
     CASE
         WHEN o.order_delivered_customer_date <=
@@ -375,8 +479,8 @@ SELECT
         2
     ) AS pct_of_reviews
 
-FROM olist_orders_dataset AS o
-JOIN olist_order_reviews_dataset AS r
+FROM valid_deliveries AS o
+JOIN order_reviews AS r
     ON o.order_id = r.order_id
 
 WHERE o.order_status = 'delivered'
@@ -390,3 +494,4 @@ GROUP BY
 ORDER BY
     delivery_status,
     r.review_score;
+

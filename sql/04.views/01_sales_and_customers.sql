@@ -1,7 +1,7 @@
--- Original sales and customer dashboard views.
+-- Sales and customer dashboard views with shared metric definitions.
+-- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
--- Monthly Sales View
-
+-- Dashboard monthly sales: all statuses; freight included; AOV excludes missing item values.
 CREATE OR REPLACE VIEW vw_monthly_sales AS
 
 WITH order_revenue AS (
@@ -35,8 +35,8 @@ LEFT JOIN order_revenue r
 GROUP BY
     DATE_FORMAT(o.order_purchase_timestamp, '%Y-%m-01');
 
--- Category Sales View
-
+-- Dashboard category sales: count distinct people, not order-specific customer records.
+-- Multi-category customer/order counts overlap.
 CREATE OR REPLACE VIEW vw_category_sales AS
 
 SELECT
@@ -49,7 +49,7 @@ SELECT
         2
     ) AS total_revenue,
 
-    COUNT(DISTINCT o.customer_id) AS unique_customers,
+    COUNT(DISTINCT c.customer_unique_id) AS unique_customers,
 
     COUNT(DISTINCT oi.product_id) AS unique_products,
 
@@ -65,6 +65,9 @@ FROM olist_order_items_dataset oi
 JOIN olist_orders_dataset o
     ON oi.order_id = o.order_id
 
+JOIN olist_customers_dataset c
+    ON o.customer_id = c.customer_id
+
 JOIN olist_products_dataset p
     ON oi.product_id = p.product_id
 
@@ -74,8 +77,7 @@ LEFT JOIN product_category_name_translation t
 GROUP BY
     COALESCE(t.product_category_name_english, 'Unknown');
 
--- Customer Segments View
-
+-- Dashboard customer segments: all statuses; item-plus-freight revenue.
 CREATE OR REPLACE VIEW vw_customer_segments AS
 
 WITH order_revenue AS (
@@ -150,17 +152,16 @@ FROM customer_segments
 GROUP BY
     customer_segment;
 
--- Customer Retention View
-
+-- Dashboard purchase-number retention: all statuses with purchase timestamps.
 CREATE OR REPLACE VIEW vw_customer_retention AS
 
 WITH
--- =========================================================
--- 1. CUSTOMER ORDER HISTORY
---
--- customer_unique_id identifies the actual customer.
--- customer_id identifies an order-specific customer record.
--- =========================================================
+
+
+
+
+
+
 customer_order_history AS (
     SELECT
         c.customer_unique_id,
@@ -182,9 +183,9 @@ customer_order_history AS (
     WHERE o.order_purchase_timestamp IS NOT NULL
 ),
 
--- =========================================================
--- 2. CUSTOMERS REACHING EACH ORDER NUMBER
--- =========================================================
+
+
+
 retention_counts AS (
     SELECT
         order_number,
@@ -198,11 +199,11 @@ retention_counts AS (
         order_number
 ),
 
--- =========================================================
--- 3. TOTAL CUSTOMER BASE
---
--- Everyone with a valid purchase timestamp has order #1.
--- =========================================================
+
+
+
+
+
 customer_base AS (
     SELECT
         MAX(
@@ -215,9 +216,9 @@ customer_base AS (
     FROM retention_counts
 )
 
--- =========================================================
--- 4. FINAL RETENTION CURVE
--- =========================================================
+
+
+
 SELECT
     r.order_number,
 
@@ -233,80 +234,48 @@ FROM retention_counts r
 
 CROSS JOIN customer_base b;
 
--- Cohort Retention View
-
+-- Dashboard cohort retention: explicit zero activity within the observed month range.
+-- Future months are absent; endpoint months may have incomplete coverage.
 CREATE OR REPLACE VIEW vw_cohort_retention AS
-
-WITH customer_orders AS (
-    SELECT DISTINCT
-        c.customer_unique_id,
-        o.order_id,
-        DATE_FORMAT(o.order_purchase_timestamp, '%Y-%m-01') AS order_month
+WITH RECURSIVE customer_orders AS (
+    SELECT c.customer_unique_id,
+        CAST(DATE_FORMAT(o.order_purchase_timestamp, '%Y-%m-01') AS DATE) AS order_month
     FROM olist_orders_dataset o
-    JOIN olist_customers_dataset c
-        ON o.customer_id = c.customer_id
+    JOIN olist_customers_dataset c ON o.customer_id = c.customer_id
     WHERE o.order_purchase_timestamp IS NOT NULL
 ),
-
+observation_end AS (
+    SELECT MAX(order_month) AS last_month FROM customer_orders
+),
 customer_first_purchase AS (
-    SELECT
-        customer_unique_id,
-        MIN(order_month) AS cohort_month
-    FROM customer_orders
-    GROUP BY customer_unique_id
+    SELECT customer_unique_id, MIN(order_month) AS cohort_month
+    FROM customer_orders GROUP BY customer_unique_id
 ),
-
-customer_activity AS (
-    SELECT DISTINCT
-        co.customer_unique_id,
-        fp.cohort_month,
-        co.order_month,
-        
-        TIMESTAMPDIFF(
-            MONTH,
-            fp.cohort_month,
-            co.order_month
-        ) AS months_since_first_purchase
-        
-    FROM customer_orders co
-    JOIN customer_first_purchase fp
-        ON co.customer_unique_id = fp.customer_unique_id
-),
-
-cohort_activity AS (
-    SELECT
-        cohort_month,
-        months_since_first_purchase,
-        COUNT(DISTINCT customer_unique_id) AS retained_customers
-    FROM customer_activity
-    GROUP BY
-        cohort_month,
-        months_since_first_purchase
-),
-
 cohort_sizes AS (
-    SELECT
-        cohort_month,
-        COUNT(DISTINCT customer_unique_id) AS cohort_size
-    FROM customer_first_purchase
-    GROUP BY cohort_month
+    SELECT cohort_month, COUNT(*) AS cohort_size
+    FROM customer_first_purchase GROUP BY cohort_month
+),
+cohort_months AS (
+    SELECT cohort_month, cohort_month AS activity_month FROM cohort_sizes
+    UNION ALL
+    SELECT cm.cohort_month, cm.activity_month + INTERVAL 1 MONTH
+    FROM cohort_months cm CROSS JOIN observation_end e
+    WHERE cm.activity_month + INTERVAL 1 MONTH <= e.last_month
+),
+cohort_activity AS (
+    SELECT fp.cohort_month, co.order_month,
+        COUNT(DISTINCT co.customer_unique_id) AS retained_customers
+    FROM customer_orders co
+    JOIN customer_first_purchase fp ON co.customer_unique_id = fp.customer_unique_id
+    GROUP BY fp.cohort_month, co.order_month
 )
+SELECT cm.cohort_month,
+    TIMESTAMPDIFF(MONTH, cm.cohort_month, cm.activity_month) AS months_since_first_purchase,
+    cs.cohort_size, COALESCE(ca.retained_customers, 0) AS retained_customers,
+    ROUND(100.0 * COALESCE(ca.retained_customers, 0) / NULLIF(cs.cohort_size, 0), 2) AS retention_pct
+FROM cohort_months cm
+JOIN cohort_sizes cs ON cm.cohort_month = cs.cohort_month
+LEFT JOIN cohort_activity ca ON cm.cohort_month = ca.cohort_month
+    AND cm.activity_month = ca.order_month
+ORDER BY cm.cohort_month, months_since_first_purchase;
 
-SELECT
-    ca.cohort_month,
-    ca.months_since_first_purchase,
-    cs.cohort_size,
-    ca.retained_customers,
-    
-    ROUND(
-        100.0 * ca.retained_customers / cs.cohort_size,
-        2
-    ) AS retention_pct
-
-FROM cohort_activity ca
-JOIN cohort_sizes cs
-    ON ca.cohort_month = cs.cohort_month
-
-ORDER BY
-    ca.cohort_month,
-    ca.months_since_first_purchase;
