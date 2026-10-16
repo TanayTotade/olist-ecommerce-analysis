@@ -1,7 +1,5 @@
 -- Customer mix, spend bands, repeat purchase value and purchase intervals.
 
--- Original SQL retained without logic changes. See docs/query_provenance.md.
-
 -- One-time vs repeat customers
 SELECT
     CASE
