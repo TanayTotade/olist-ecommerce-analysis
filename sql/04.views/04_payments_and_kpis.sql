@@ -1,13 +1,17 @@
 -- Payment and KPI dashboard views. Run after the seller views.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Payment metrics: defined methods; usage shares overlap.
 -- avg_payment_value now averages summed order-method values, not individual payment records.
 CREATE OR REPLACE VIEW vw_payment_behavior AS
 
 WITH order_payment_values AS (
-    SELECT order_id, payment_type, SUM(payment_value) AS payment_value
+    SELECT 
+        order_id, 
+        payment_type, 
+        SUM(payment_value) AS payment_value
+    
     FROM olist_order_payments_dataset
+    
     WHERE payment_type <> 'not_defined'
     GROUP BY order_id, payment_type
 ),
@@ -31,6 +35,7 @@ payment_type_metrics AS (
 total_orders AS (
     SELECT
         COUNT(DISTINCT order_id) AS all_paid_orders
+    
     FROM olist_order_payments_dataset
     WHERE payment_type <> 'not_defined'
 )
@@ -64,21 +69,14 @@ CROSS JOIN total_orders t;
 -- Seller KPIs read vw_seller_performance directly; unused alternative risk CTEs removed.
 CREATE OR REPLACE VIEW vw_kpis AS
 
-WITH
-
-
-
-order_revenue AS (
+WITH order_revenue AS (
     SELECT
         order_id,
         SUM(price + freight_value) AS order_revenue
+    
     FROM olist_order_items_dataset
     GROUP BY order_id
 ),
-
-
-
-
 sales_metrics AS (
     SELECT
         COUNT(DISTINCT o.order_id) AS total_orders,
@@ -90,10 +88,6 @@ sales_metrics AS (
     LEFT JOIN order_revenue r
         ON o.order_id = r.order_id
 ),
-
-
-
-
 customer_orders AS (
     SELECT
         c.customer_unique_id,
@@ -107,10 +101,6 @@ customer_orders AS (
     GROUP BY
         c.customer_unique_id
 ),
-
-
-
-
 customer_metrics AS (
     SELECT
         COUNT(*) AS unique_customers,
@@ -118,14 +108,6 @@ customer_metrics AS (
 
     FROM customer_orders
 ),
-
-
-
-
-
-
-
-
 delivery_metrics AS (
     SELECT
         COUNT(*) AS delivered_orders,
@@ -159,13 +141,6 @@ delivery_metrics AS (
         AND order_delivered_customer_date >=
             order_delivered_carrier_date
 ),
-
-
-
-
-
-
-
 ranked_reviews AS (
     SELECT
         r.order_id,
@@ -180,11 +155,6 @@ ranked_reviews AS (
 
     FROM olist_order_reviews_dataset r
 ),
-
-
-
-
-
 deduplicated_reviews AS (
     SELECT
         order_id,
@@ -194,10 +164,6 @@ deduplicated_reviews AS (
 
     WHERE rn = 1
 ),
-
-
-
-
 review_metrics AS (
     SELECT
         COUNT(*) AS reviewed_orders,
@@ -206,10 +172,6 @@ review_metrics AS (
 
     FROM deduplicated_reviews
 ),
-
-
-
-
 seller_metrics AS (
     SELECT
         COUNT(*) AS active_sellers,
@@ -220,12 +182,7 @@ seller_metrics AS (
 
     FROM vw_seller_performance
 )
-
-
-
-
-SELECT
-    
+SELECT  
     ROUND(s.total_revenue, 2)
         AS total_revenue,
 
@@ -233,7 +190,6 @@ SELECT
 
     ROUND(s.avg_order_value, 2)
         AS avg_order_value,
-
     
     c.unique_customers,
 
@@ -253,7 +209,6 @@ SELECT
         2
     ) AS late_delivery_rate_pct,
 
-    
     ROUND(r.avg_review_score, 2)
         AS avg_review_score,
 
@@ -262,8 +217,7 @@ SELECT
         NULLIF(r.reviewed_orders, 0),
         2
     ) AS negative_review_rate_pct,
-
-    
+   
     sm.active_sellers,
 
     sm.high_risk_sellers,
