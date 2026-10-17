@@ -1,8 +1,7 @@
 -- Payment usage, order-level installments and customer outcomes.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Question: What share of paid orders uses each defined payment method?
--- Methods overlap within orders, so usage shares may exceed 100% in total. All statuses.
+-- Methods overlap within orders, so usage shares may exceed 100% in total. All order statuses.
 SELECT
     payment_type,
     COUNT(DISTINCT order_id) AS orders,
@@ -67,17 +66,10 @@ SELECT
         WHEN payment_installments BETWEEN 7 AND 12 THEN 'Long-term (7-12)'
         WHEN payment_installments >= 13 THEN 'Extended (13+)'
     END AS installment_group,
-
     COUNT(DISTINCT order_id) AS orders,
-
     ROUND(AVG(payment_value), 2) AS avg_credit_card_value_per_order
-
 FROM credit_card_orders
-
-
-
 GROUP BY installment_group
-
 ORDER BY
     CASE installment_group
         WHEN 'Single payment' THEN 1
@@ -97,7 +89,6 @@ WITH order_payments AS
     FROM olist_order_payments_dataset
     GROUP BY order_id
 )
-
 SELECT
     payment_count,
     COUNT(*) AS orders,
@@ -121,7 +112,6 @@ WITH order_payment_methods AS
     FROM olist_order_payments_dataset
     GROUP BY order_id
 )
-
 SELECT
     payment_methods,
     COUNT(*) AS orders,
@@ -150,7 +140,6 @@ WITH monthly_payments AS
         purchase_month,
         p.payment_type
 ),
-
 monthly_orders AS
 (
     SELECT
@@ -162,7 +151,6 @@ monthly_orders AS
     WHERE p.payment_type <> 'not_defined'
     GROUP BY purchase_month
 )
-
 SELECT
     mp.purchase_month,
     mp.payment_type,
@@ -196,7 +184,6 @@ WITH state_payment AS
         c.customer_state,
         p.payment_type
 ),
-
 state_orders AS
 (
     SELECT
@@ -210,47 +197,39 @@ state_orders AS
     WHERE p.payment_type <> 'not_defined'
     GROUP BY c.customer_state
 )
-
 SELECT
     sp.customer_state,
-    so.total_orders,
-    
+    so.total_orders,  
     ROUND(
         SUM(CASE WHEN sp.payment_type = 'credit_card'
                  THEN sp.orders ELSE 0 END)
         * 100.0 / so.total_orders,
         2
     ) AS credit_card_pct,
-
     ROUND(
         SUM(CASE WHEN sp.payment_type = 'boleto'
                  THEN sp.orders ELSE 0 END)
         * 100.0 / so.total_orders,
         2
     ) AS boleto_pct,
-
     ROUND(
         SUM(CASE WHEN sp.payment_type = 'voucher'
                  THEN sp.orders ELSE 0 END)
         * 100.0 / so.total_orders,
         2
     ) AS voucher_pct,
-
     ROUND(
         SUM(CASE WHEN sp.payment_type = 'debit_card'
                  THEN sp.orders ELSE 0 END)
         * 100.0 / so.total_orders,
         2
     ) AS debit_card_pct
-
 FROM state_payment sp
 JOIN state_orders so
     ON sp.customer_state = so.customer_state
-
 GROUP BY
     sp.customer_state,
     so.total_orders
-
 ORDER BY so.total_orders DESC;
 
 -- Question: What is the value paid through each method per order?
@@ -267,7 +246,6 @@ WITH order_payment_type AS
         order_id,
         payment_type
 )
-
 SELECT
     payment_type,
     COUNT(*) AS orders_using_method,
@@ -299,20 +277,16 @@ order_payment_method AS
     FROM olist_order_payments_dataset
     WHERE payment_type <> 'not_defined'
 )
-
 SELECT
     p.payment_type,
     COUNT(*) AS reviewed_orders,
-
     ROUND(AVG(r.review_score), 2) AS avg_review_score,
-
     SUM(
         CASE
             WHEN r.review_score <= 2 THEN 1
             ELSE 0
         END
     ) AS negative_reviews,
-
     ROUND(
         SUM(
             CASE
@@ -322,14 +296,10 @@ SELECT
         ) * 100.0 / COUNT(*),
         2
     ) AS negative_review_pct
-
 FROM order_payment_method p
-
 JOIN order_reviews r
     ON p.order_id = r.order_id
-
 GROUP BY p.payment_type
-
 ORDER BY avg_review_score DESC;
 
 -- Question: How do eligible delivery outcomes differ across payment methods?
@@ -348,6 +318,7 @@ WITH valid_deliveries AS (
       AND o.order_delivered_carrier_date IS NOT NULL
       AND o.order_delivered_customer_date IS NOT NULL
       AND o.order_estimated_delivery_date IS NOT NULL
+    
       AND o.order_approved_at >= o.order_purchase_timestamp
       AND o.order_delivered_carrier_date >= o.order_approved_at
       AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
@@ -360,12 +331,9 @@ order_payment_method AS
     FROM olist_order_payments_dataset
     WHERE payment_type <> 'not_defined'
 )
-
 SELECT
     p.payment_type,
-
     COUNT(*) AS delivered_orders,
-
     ROUND(
         AVG(
             TIMESTAMPDIFF(SECOND,
@@ -375,7 +343,6 @@ SELECT
         ) / 86400.0,
         2
     ) AS avg_delivery_days,
-
     ROUND(
         SUM(
             CASE
@@ -387,18 +354,13 @@ SELECT
         ) * 100.0 / COUNT(*),
         2
     ) AS late_delivery_pct
-
 FROM order_payment_method p
-
 JOIN valid_deliveries o
     ON p.order_id = o.order_id
-
 WHERE o.order_status = 'delivered'
     AND o.order_purchase_timestamp IS NOT NULL
     AND o.order_delivered_customer_date IS NOT NULL
     AND o.order_estimated_delivery_date IS NOT NULL
-
 GROUP BY p.payment_type
-
 ORDER BY avg_delivery_days;
 
