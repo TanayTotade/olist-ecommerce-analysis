@@ -1,5 +1,4 @@
 -- Sales and customer dashboard views with shared metric definitions.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Dashboard monthly sales: all statuses; freight included; AOV excludes missing item values.
 CREATE OR REPLACE VIEW vw_monthly_sales AS
