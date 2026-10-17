@@ -1,5 +1,4 @@
 -- Sales baseline and monthly trend aligned with dashboard sales definitions.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Question: What are total sales, their components, and average order value?
 -- All order statuses; total revenue includes freight. AOV excludes missing item values.
@@ -19,7 +18,6 @@ FROM olist_orders_dataset o
 LEFT JOIN order_revenue r ON o.order_id = r.order_id;
 
 -- Question: How do sales change by purchase month?
--- Orders without items remain in order counts and contribute zero revenue, but not to AOV.
 WITH order_revenue AS (
     SELECT order_id, SUM(price + freight_value) AS order_revenue
     FROM olist_order_items_dataset GROUP BY order_id
