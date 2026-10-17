@@ -155,14 +155,7 @@ GROUP BY
 -- Dashboard purchase-number retention: all statuses with purchase timestamps.
 CREATE OR REPLACE VIEW vw_customer_retention AS
 
-WITH
-
-
-
-
-
-
-customer_order_history AS (
+WITH customer_order_history AS (
     SELECT
         c.customer_unique_id,
         o.order_id,
@@ -182,10 +175,6 @@ customer_order_history AS (
 
     WHERE o.order_purchase_timestamp IS NOT NULL
 ),
-
-
-
-
 retention_counts AS (
     SELECT
         order_number,
@@ -198,12 +187,6 @@ retention_counts AS (
     GROUP BY
         order_number
 ),
-
-
-
-
-
-
 customer_base AS (
     SELECT
         MAX(
@@ -215,10 +198,6 @@ customer_base AS (
 
     FROM retention_counts
 )
-
-
-
-
 SELECT
     r.order_number,
 
@@ -237,45 +216,94 @@ CROSS JOIN customer_base b;
 -- Dashboard cohort retention: explicit zero activity within the observed month range.
 -- Future months are absent; endpoint months may have incomplete coverage.
 CREATE OR REPLACE VIEW vw_cohort_retention AS
+    
 WITH RECURSIVE customer_orders AS (
-    SELECT c.customer_unique_id,
+    SELECT 
+        c.customer_unique_id,
+        
         CAST(DATE_FORMAT(o.order_purchase_timestamp, '%Y-%m-01') AS DATE) AS order_month
+    
     FROM olist_orders_dataset o
-    JOIN olist_customers_dataset c ON o.customer_id = c.customer_id
+    
+    JOIN olist_customers_dataset c 
+        ON o.customer_id = c.customer_id
+    
     WHERE o.order_purchase_timestamp IS NOT NULL
 ),
 observation_end AS (
     SELECT MAX(order_month) AS last_month FROM customer_orders
 ),
 customer_first_purchase AS (
-    SELECT customer_unique_id, MIN(order_month) AS cohort_month
-    FROM customer_orders GROUP BY customer_unique_id
+    SELECT 
+        customer_unique_id, 
+        MIN(order_month) AS cohort_month
+    
+    FROM customer_orders 
+    GROUP BY customer_unique_id
 ),
 cohort_sizes AS (
-    SELECT cohort_month, COUNT(*) AS cohort_size
-    FROM customer_first_purchase GROUP BY cohort_month
+    SELECT 
+        cohort_month, 
+        COUNT(*) AS cohort_size
+    
+    FROM customer_first_purchase 
+    GROUP BY cohort_month
 ),
 cohort_months AS (
-    SELECT cohort_month, cohort_month AS activity_month FROM cohort_sizes
+    SELECT 
+        cohort_month, 
+        cohort_month AS activity_month
+    FROM cohort_sizes
+    
     UNION ALL
-    SELECT cm.cohort_month, cm.activity_month + INTERVAL 1 MONTH
-    FROM cohort_months cm CROSS JOIN observation_end e
+    
+    SELECT 
+        cm.cohort_month, 
+        cm.activity_month + INTERVAL 1 MONTH
+    
+    FROM cohort_months cm 
+    
+    CROSS JOIN observation_end e
+    
     WHERE cm.activity_month + INTERVAL 1 MONTH <= e.last_month
 ),
 cohort_activity AS (
-    SELECT fp.cohort_month, co.order_month,
+    SELECT 
+        fp.cohort_month, 
+        co.order_month,
+        
         COUNT(DISTINCT co.customer_unique_id) AS retained_customers
+    
     FROM customer_orders co
-    JOIN customer_first_purchase fp ON co.customer_unique_id = fp.customer_unique_id
+    
+    JOIN customer_first_purchase fp 
+        ON co.customer_unique_id = fp.customer_unique_id
+    
     GROUP BY fp.cohort_month, co.order_month
 )
-SELECT cm.cohort_month,
-    TIMESTAMPDIFF(MONTH, cm.cohort_month, cm.activity_month) AS months_since_first_purchase,
-    cs.cohort_size, COALESCE(ca.retained_customers, 0) AS retained_customers,
-    ROUND(100.0 * COALESCE(ca.retained_customers, 0) / NULLIF(cs.cohort_size, 0), 2) AS retention_pct
+SELECT 
+    cm.cohort_month,
+    
+    TIMESTAMPDIFF(
+        MONTH, 
+        cm.cohort_month, 
+        cm.activity_month) AS months_since_first_purchase,
+    
+    cs.cohort_size, 
+    COALESCE(ca.retained_customers, 0) AS retained_customers,
+    
+    ROUND(
+        100.0 * COALESCE(ca.retained_customers, 0) / 
+        NULLIF(cs.cohort_size, 0), 2) AS retention_pct
+
 FROM cohort_months cm
-JOIN cohort_sizes cs ON cm.cohort_month = cs.cohort_month
-LEFT JOIN cohort_activity ca ON cm.cohort_month = ca.cohort_month
+
+JOIN cohort_sizes cs 
+    ON cm.cohort_month = cs.cohort_month
+
+LEFT JOIN cohort_activity ca 
+    ON cm.cohort_month = ca.cohort_month
     AND cm.activity_month = ca.order_month
+
 ORDER BY cm.cohort_month, months_since_first_purchase;
 
