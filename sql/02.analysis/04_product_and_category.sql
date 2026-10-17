@@ -1,8 +1,7 @@
 -- Product and category supporting analysis; product_revenue consistently excludes freight.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Question: Which three products lead each category by product revenue?
--- All statuses; product prices exclude freight. ROW_NUMBER selects three even when tied.
+-- All order statuses; product prices exclude freight. ROW_NUMBER selects three even when tied.
 WITH product_sales AS (
     SELECT
         oi.product_id,
@@ -52,7 +51,6 @@ WITH category_performance AS (
         ON oi.product_id = p.product_id
     GROUP BY p.product_category_name
 ),
-
 category_shares AS (
     SELECT
         product_category_name,
@@ -62,7 +60,6 @@ category_shares AS (
         product_revenue / SUM(product_revenue) OVER () * 100 AS revenue_share_pct
     FROM category_performance
 )
-
 SELECT
     product_category_name,
     items_sold,
@@ -70,7 +67,6 @@ SELECT
     ROUND(volume_share_pct, 2) AS volume_share_pct,
     ROUND(revenue_share_pct, 2) AS revenue_share_pct,
     ROUND(revenue_share_pct - volume_share_pct, 2) AS revenue_volume_gap_pct,
-
     CASE
         WHEN revenue_share_pct > volume_share_pct
             THEN 'Revenue-heavy'
@@ -78,7 +74,6 @@ SELECT
             THEN 'Volume-heavy'
         ELSE 'Balanced'
     END AS category_pattern
-
 FROM category_shares
 ORDER BY revenue_volume_gap_pct DESC;
 
@@ -102,7 +97,7 @@ GROUP BY p.product_category_name
 ORDER BY freight_to_product_pct DESC;
 
 -- Question: How concentrated is each named category in its three highest-selling products?
--- Product-only revenue, all statuses. Categories with fewer than three products can reach 100%.
+-- Product-only revenue, all order statuses. Categories with fewer than three products can reach 100%.
 WITH product_revenue AS (
     SELECT
         p.product_category_name,
@@ -156,15 +151,15 @@ WITH RECURSIVE month_spine AS (
                 MIN(order_purchase_timestamp),
                 '%Y-%m-01'
             ) AS DATE
-        ) AS month
+        ) AS purchase_month
     FROM olist_orders_dataset
 
     UNION ALL
 
     SELECT
-        month + INTERVAL 1 MONTH
+        purchase_month + INTERVAL 1 MONTH
     FROM month_spine
-    WHERE month + INTERVAL 1 MONTH <= (
+    WHERE purchase_month + INTERVAL 1 MONTH <= (
         SELECT
             CAST(
                 DATE_FORMAT(
@@ -175,41 +170,29 @@ WITH RECURSIVE month_spine AS (
         FROM olist_orders_dataset
     )
 ),
-
 categories AS (
-
     SELECT DISTINCT
         product_category_name
     FROM olist_products_dataset
     WHERE product_category_name IS NOT NULL
-
 ),
-
 monthly_sales AS (
-
     SELECT
         CAST(
             DATE_FORMAT(
                 o.order_purchase_timestamp,
                 '%Y-%m-01'
             ) AS DATE
-        ) AS month,
-
+        ) AS sales_month,
         p.product_category_name,
-
         COUNT(*) AS items_sold,
         SUM(oi.price) AS product_revenue
-
     FROM olist_orders_dataset o
-
     JOIN olist_order_items_dataset oi
         ON o.order_id = oi.order_id
-
     JOIN olist_products_dataset p
         ON oi.product_id = p.product_id
-
     WHERE p.product_category_name IS NOT NULL
-
     GROUP BY
         CAST(
             DATE_FORMAT(
@@ -219,100 +202,74 @@ monthly_sales AS (
         ),
         p.product_category_name
 ),
-
 complete_series AS (
-
     SELECT
-        ms.month,
+        ms.sales_month,
         c.product_category_name,
-
         COALESCE(s.items_sold, 0) AS items_sold,
         COALESCE(s.product_revenue, 0) AS product_revenue
-
     FROM month_spine ms
-
     CROSS JOIN categories c
-
     LEFT JOIN monthly_sales s
-        ON ms.month = s.month
+        ON ms.sales_month = s.purchase_month
         AND c.product_category_name = s.product_category_name
 ),
 category_growth AS (
-
     SELECT
-        month,
+        sales_month,
         product_category_name,
         items_sold,
         product_revenue,
-
         LAG(product_revenue) OVER (
             PARTITION BY product_category_name
             ORDER BY month
         ) AS previous_month_revenue
-
     FROM complete_series
 )
-
 SELECT
-    month,
+    sales_month,
     product_category_name,
     items_sold,
-
     ROUND(product_revenue, 2) AS product_revenue,
     ROUND(previous_month_revenue, 2) AS previous_month_revenue,
-
     ROUND(
         (product_revenue - previous_month_revenue)
         / NULLIF(previous_month_revenue, 0) * 100,
         2
     ) AS mom_growth_pct
-
 FROM category_growth
-
 ORDER BY
     product_category_name,
-    month;
+    sales_month;
 
 -- Question: What share of each named category's customers ordered in it more than once?
--- All statuses; distinct orders per person. Customers can belong to several categories.
+-- All order statuses; distinct orders per person. Customers can belong to several categories.
 WITH customer_category_behavior AS (
-
     SELECT
         c.customer_unique_id,
         p.product_category_name,
-
         COUNT(DISTINCT o.order_id) AS category_orders
-
     FROM olist_customers_dataset c
-
     JOIN olist_orders_dataset o
         ON c.customer_id = o.customer_id
-
     JOIN olist_order_items_dataset oi
         ON o.order_id = oi.order_id
-
     JOIN olist_products_dataset p
         ON oi.product_id = p.product_id
-
     WHERE p.product_category_name IS NOT NULL
-
     GROUP BY
         c.customer_unique_id,
         p.product_category_name
 )
-
 SELECT
     product_category_name,
-
     COUNT(*) AS unique_customers,
-
     SUM(
         CASE
             WHEN category_orders > 1 THEN 1
             ELSE 0
         END
     ) AS repeat_customers,
-
     ROUND(
         SUM(
             CASE
@@ -322,11 +279,8 @@ SELECT
         ) / COUNT(*) * 100,
         2
     ) AS repeat_customer_pct
-
 FROM customer_category_behavior
-
 GROUP BY product_category_name
-
 ORDER BY repeat_customer_pct DESC;
 
 -- Question: How do product sales and satisfaction compare by category?
@@ -347,64 +301,42 @@ order_categories AS (
         oi.order_id,
         p.product_category_name
     FROM olist_order_items_dataset oi
-
     JOIN olist_products_dataset p
         ON oi.product_id = p.product_id
-
     WHERE p.product_category_name IS NOT NULL
 ),
-
 category_reviews AS (
     SELECT
         oc.product_category_name,
-
         COUNT(*) AS reviewed_orders,
-
         AVG(orv.review_score) AS avg_review_score
-
     FROM order_categories oc
-
     JOIN order_reviews orv
         ON oc.order_id = orv.order_id
-
     GROUP BY oc.product_category_name
 ),
-
 category_sales AS (
     SELECT
         p.product_category_name,
-
         COUNT(*) AS items_sold,
         SUM(oi.price) AS product_revenue
-
     FROM olist_order_items_dataset oi
-
     JOIN olist_products_dataset p
         ON oi.product_id = p.product_id
-
     WHERE p.product_category_name IS NOT NULL
-
     GROUP BY p.product_category_name
 )
-
 SELECT
     cs.product_category_name,
-
     cs.items_sold,
-
     ROUND(cs.product_revenue, 2)
         AS product_revenue,
-
     cr.reviewed_orders,
-
     ROUND(cr.avg_review_score, 2)
         AS avg_review_score
-
 FROM category_sales cs
-
 LEFT JOIN category_reviews cr
     ON cs.product_category_name =
        cr.product_category_name
-
 ORDER BY cs.product_revenue DESC;
 
