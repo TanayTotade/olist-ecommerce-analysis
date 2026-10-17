@@ -1,16 +1,18 @@
 -- Regional sales concentration and purchasing behavior; duplicate delivery query consolidated.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Question: How concentrated is item-plus-freight sales value across customer states?
--- All statuses; retain orders without items in counts, with zero sales contribution.
+-- All order statuses; retain orders without items in counts, with zero sales contribution.
 WITH order_revenue AS (
     SELECT
         o.order_id,
         c.customer_state,
         SUM(oi.price + oi.freight_value) AS order_revenue
+    
     FROM olist_orders_dataset AS o
+    
     JOIN olist_customers_dataset AS c
         ON o.customer_id = c.customer_id
+    
     LEFT JOIN olist_order_items_dataset AS oi
         ON o.order_id = oi.order_id
     
@@ -24,6 +26,7 @@ state_revenue AS (
         customer_state,
         COUNT(*) AS total_orders,
         SUM(COALESCE(order_revenue, 0)) AS revenue
+    
     FROM order_revenue
     GROUP BY customer_state
 ),
@@ -43,9 +46,9 @@ state_metrics AS (
 SELECT
     customer_state,
     total_orders,
+    
     ROUND(revenue, 2) AS revenue,
     ROUND(revenue_percentage, 2) AS revenue_percentage,
-
     ROUND(
         SUM(revenue_percentage) OVER (
             ORDER BY revenue DESC
@@ -58,7 +61,7 @@ FROM state_metrics
 ORDER BY revenue DESC;
 
 -- Question: How do customer frequency and spending differ by state?
--- All statuses; distinct people within each state. Revenue includes freight.
+-- All order statuses; distinct people within each state. Revenue includes freight.
 -- AOV excludes missing item values; orders-per-customer retains all orders.
 -- See 05_delivery_performance.sql for the single authoritative supporting state-delivery query.
 WITH order_revenue AS (
@@ -67,9 +70,12 @@ WITH order_revenue AS (
         c.customer_unique_id,
         c.customer_state,
         SUM(oi.price + oi.freight_value) AS order_revenue
+    
     FROM olist_orders_dataset AS o
+    
     JOIN olist_customers_dataset AS c
         ON o.customer_id = c.customer_id
+    
     LEFT JOIN olist_order_items_dataset AS oi
         ON o.order_id = oi.order_id
     
@@ -84,12 +90,13 @@ state_behavior AS (
         customer_state,
         COUNT(DISTINCT customer_unique_id) AS customers,
         COUNT(*) AS orders,
+    
         AVG(order_revenue) AS avg_item_order_value,
         SUM(COALESCE(order_revenue, 0)) AS revenue
+    
     FROM order_revenue
     GROUP BY customer_state
 )
-
 SELECT
     customer_state,
     customers,
