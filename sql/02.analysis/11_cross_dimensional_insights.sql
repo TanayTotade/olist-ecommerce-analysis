@@ -1,5 +1,4 @@
 -- Exploratory on-time complaint risk comparisons at unique reviewed-order grain.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Question: Does negative feedback persist for sellers even when delivery is on time?
 -- Single-seller eligible deliveries; one latest review per order.
@@ -7,11 +6,16 @@
 -- This exploratory threshold differs intentionally from the dashboard seller-risk heuristic.
 -- Classification and comparison use the same historical sample; this is not predictive validation.
 WITH valid_deliveries AS (
-    SELECT o.*,
-        TIMESTAMPDIFF(SECOND, o.order_approved_at,
-            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+    SELECT 
+        o.*,
+        TIMESTAMPDIFF(
+            SECOND, 
+            o.order_approved_at, o.order_delivered_carrier_date
+        ) / 86400.0 AS stage_dispatch_days,
+    
         CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
             THEN 1 ELSE 0 END AS is_late
+    
     FROM olist_orders_dataset o
     WHERE o.order_status = 'delivered'
       AND o.order_purchase_timestamp IS NOT NULL
@@ -19,15 +23,20 @@ WITH valid_deliveries AS (
       AND o.order_delivered_carrier_date IS NOT NULL
       AND o.order_delivered_customer_date IS NOT NULL
       AND o.order_estimated_delivery_date IS NOT NULL
+    
       AND o.order_approved_at >= o.order_purchase_timestamp
       AND o.order_delivered_carrier_date >= o.order_approved_at
       AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
 ),
 ranked_reviews AS (
-    SELECT r.*, ROW_NUMBER() OVER (
-        PARTITION BY r.order_id
-        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    SELECT 
+        r.*, 
+        ROW_NUMBER() OVER (
+            PARTITION BY r.order_id
+            ORDER BY r.review_answer_timestamp DESC, 
+                     r.review_row_id DESC
     ) AS review_rank
+    
     FROM olist_order_reviews_dataset r
 ),
 order_reviews AS (
@@ -37,11 +46,12 @@ single_seller_orders AS (
     SELECT
         order_id,
         MIN(seller_id) AS seller_id
+    
     FROM olist_order_items_dataset
+    
     GROUP BY order_id
     HAVING COUNT(DISTINCT seller_id) = 1
 ),
-
 seller_performance AS (
     SELECT
         sso.seller_id,
@@ -123,7 +133,6 @@ order_base AS (
     WHERE o.order_status = 'delivered'
       AND o.order_delivered_customer_date IS NOT NULL
 )
-
 SELECT
     delivery_status,
     seller_risk,
@@ -161,11 +170,18 @@ ORDER BY
 -- High risk means >=12% on-time negative reviews, distinct from the dashboard category heuristic.
 -- Descriptive same-sample associations do not establish causation.
 WITH valid_deliveries AS (
-    SELECT o.*,
-        TIMESTAMPDIFF(SECOND, o.order_approved_at,
-            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
-        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 ELSE 0 END AS is_late
+    SELECT 
+        o.*,
+        TIMESTAMPDIFF(
+            SECOND, 
+            o.order_approved_at, o.order_delivered_carrier_date
+        ) / 86400.0 AS stage_dispatch_days,
+        
+        CASE 
+            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+            THEN 1 ELSE 0 
+        END AS is_late
+    
     FROM olist_orders_dataset o
     WHERE o.order_status = 'delivered'
       AND o.order_purchase_timestamp IS NOT NULL
@@ -173,15 +189,20 @@ WITH valid_deliveries AS (
       AND o.order_delivered_carrier_date IS NOT NULL
       AND o.order_delivered_customer_date IS NOT NULL
       AND o.order_estimated_delivery_date IS NOT NULL
+    
       AND o.order_approved_at >= o.order_purchase_timestamp
       AND o.order_delivered_carrier_date >= o.order_approved_at
       AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
 ),
 ranked_reviews AS (
-    SELECT r.*, ROW_NUMBER() OVER (
-        PARTITION BY r.order_id
-        ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+    SELECT 
+        r.*, 
+        ROW_NUMBER() OVER (
+            PARTITION BY r.order_id
+            ORDER BY r.review_answer_timestamp DESC, 
+                     r.review_row_id DESC
     ) AS review_rank
+    
     FROM olist_order_reviews_dataset r
 ),
 order_reviews AS (
@@ -290,7 +311,6 @@ order_base AS (
     WHERE o.order_status = 'delivered'
       AND o.order_delivered_customer_date IS NOT NULL
 )
-
 SELECT
     delivery_status,
     category_risk,
