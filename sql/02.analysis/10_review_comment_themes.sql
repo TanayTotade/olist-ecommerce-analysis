@@ -1,8 +1,6 @@
 -- Exploratory comment participation and overlapping complaint themes; not validated sentiment analysis.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Question: How often do review records contain nonblank comments, and how long are they?
--- Original review records are retained for text exploration; these are not unique-order metrics.
 SELECT
     review_score,
     COUNT(*) AS total_reviews,
@@ -40,67 +38,59 @@ SELECT
     ) AS avg_comment_length
 
 FROM olist_order_reviews_dataset
+    
 GROUP BY review_score
 ORDER BY review_score;
 
 -- Question: Which themes occur in negative comments (scores 1-2)?
--- Portuguese regex rules are approximate and have not been manually validated.
 -- Themes overlap; classified_pct is matching coverage, not accuracy. Counts are comment records.
 WITH classified_reviews AS (
     SELECT
         review_id,
         review_score,
         review_comment_message,
-
         
         CASE
             WHEN LOWER(review_comment_message) REGEXP
                 'não recebi|nao recebi|não.*entreg|nao.*entreg|não chegou|nao chegou|não.*chegou|nao.*chegou|nada de chegar|quando chegar|aguardando.*chegada|aguardando.*produto|atras|demor|prazo.*entrega|data prevista|dias previstos|passou.*prazo|passou.*dias|quase [0-9]+ dias'
             THEN 1 ELSE 0
         END AS delivery,
-
         
         CASE
             WHEN LOWER(review_comment_message) REGEXP
                 'faltou|faltando|pedido incompleto|somente.*um|somente.*uma|apenas.*um|apenas.*uma|recebi.*metade|só recebi|so recebi|recebemos.*1|recebi.*dois.*um|recebi.*duas.*uma'
             THEN 1 ELSE 0
         END AS missing_product,
-
         
         CASE
             WHEN LOWER(review_comment_message) REGEXP
                 'produto errado|produto diferente|produto.*difere|veio outro|recebi outro|enviaram.*outro|cor.*chegou.*cor|não.*foto|nao.*foto|não.*descri|nao.*descri|não.*anúncio|nao.*anuncio|inferior'
             THEN 1 ELSE 0
         END AS product_mismatch,
-
         
         CASE
             WHEN LOWER(review_comment_message) REGEXP
                 'péssima qualidade|pessima qualidade|má qualidade|ma qualidade|qualidade.*ruim|não funciona|nao funciona|defeito|defeitu|quebrou|fraco|fraca|mal acabado|acabamento.*ruim|material.*ruim|não recomendo|nao recomendo'
             THEN 1 ELSE 0
         END AS quality_defect,
-
         
         CASE
             WHEN LOWER(review_comment_message) REGEXP
                 'danific|quebrad|avariad|amassad|descolad|embalagem|caixa.*destru|batido|batida'
             THEN 1 ELSE 0
         END AS damage_packaging,
-
         
         CASE
             WHEN LOWER(review_comment_message) REGEXP
                 'cancel|reembolso|devolver|devolução|devolucao|ressarc|dinheiro de volta|estorno|troca'
             THEN 1 ELSE 0
         END AS refund_return,
-
         
         CASE
             WHEN LOWER(review_comment_message) REGEXP
                 'sem estoque|não tem.*estoque|nao tem.*estoque|não tinham.*dispon|nao tinham.*dispon|indisponível|indisponivel|disponibilidade'
             THEN 1 ELSE 0
         END AS stock,
-
         
         CASE
             WHEN LOWER(review_comment_message) REGEXP
@@ -109,6 +99,7 @@ WITH classified_reviews AS (
         END AS service_communication
 
     FROM olist_order_reviews_dataset
+    
     WHERE review_score IN (1, 2)
       AND review_comment_message IS NOT NULL
       AND TRIM(review_comment_message) <> ''
@@ -118,6 +109,7 @@ SELECT
     COUNT(*) AS negative_comments,
 
     SUM(delivery) AS delivery,
+    
     SUM(missing_product) AS missing_product,
     SUM(product_mismatch) AS product_mismatch,
     SUM(quality_defect) AS quality_defect,
@@ -167,14 +159,15 @@ WITH delivery_complaints AS (
         r.order_id,
         r.review_score,
         r.review_comment_message
+    
     FROM olist_order_reviews_dataset AS r
+    
     WHERE r.review_score IN (1, 2)
       AND r.review_comment_message IS NOT NULL
       AND TRIM(r.review_comment_message) <> ''
       AND LOWER(r.review_comment_message) REGEXP
           'não recebi|nao recebi|não.*entreg|nao.*entreg|não chegou|nao chegou|não.*chegou|nao.*chegou|nada de chegar|quando chegar|aguardando.*chegada|aguardando.*produto|atras|demor|prazo.*entrega|data prevista|dias previstos|passou.*prazo|passou.*dias|quase [0-9]+ dias'
 )
-
 SELECT
     CASE
         WHEN o.order_delivered_customer_date IS NULL
@@ -198,6 +191,7 @@ SELECT
     ) AS pct_of_delivery_complaints
 
 FROM delivery_complaints AS dc
+    
 JOIN olist_orders_dataset AS o
     ON dc.order_id = o.order_id
 
@@ -223,13 +217,13 @@ WITH delivery_complaints AS (
     SELECT
         r.order_id
     FROM olist_order_reviews_dataset AS r
+    
     WHERE r.review_score IN (1, 2)
       AND r.review_comment_message IS NOT NULL
       AND TRIM(r.review_comment_message) <> ''
       AND LOWER(r.review_comment_message) REGEXP
           'não recebi|nao recebi|não.*entreg|nao.*entreg|não chegou|nao chegou|não.*chegou|nao.*chegou|nada de chegar|quando chegar|aguardando.*chegada|aguardando.*produto|atras|demor|prazo.*entrega|data prevista|dias previstos|passou.*prazo|passou.*dias|quase [0-9]+ dias'
 )
-
 SELECT
     o.order_status,
     COUNT(*) AS complaint_reviews,
