@@ -1,5 +1,4 @@
 -- Monthly cohort retention aligned with the dashboard cohort view.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Question: What share of each acquisition cohort purchases in each observed month?
 -- All order statuses, valid purchase timestamps, and distinct people per active month.
