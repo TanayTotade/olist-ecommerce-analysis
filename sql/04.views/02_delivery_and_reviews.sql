@@ -1,5 +1,4 @@
 -- Delivery and latest-review dashboard views; shared delay definitions.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Eligible delivered orders: complete chronological stage dates and an estimate.
 -- Full timestamp lateness; delay bands represent (0,3], (3,7], (7,14], and >14 days.
@@ -69,6 +68,7 @@ SELECT
         THEN 'Late'
         ELSE 'On Time / Early'
     END AS delivery_status,
+	
     CASE
 		WHEN o.order_delivered_customer_date <=
 			 o.order_estimated_delivery_date
@@ -110,6 +110,7 @@ WHERE
     AND o.order_delivered_carrier_date IS NOT NULL
     AND o.order_delivered_customer_date IS NOT NULL
     AND o.order_estimated_delivery_date IS NOT NULL
+	
     AND o.order_approved_at >= o.order_purchase_timestamp
     AND o.order_delivered_carrier_date >= o.order_approved_at
     AND o.order_delivered_customer_date >= o.order_delivered_carrier_date;
@@ -154,18 +155,12 @@ SELECT
 
     r.review_score,
 
-    
-    
-    
     CASE
         WHEN r.review_score <= 2 THEN 'Negative'
         WHEN r.review_score = 3 THEN 'Neutral'
         WHEN r.review_score >= 4 THEN 'Positive'
     END AS satisfaction_segment,
 
-    
-    
-    
     CASE
         WHEN o.order_delivered_customer_date IS NULL
             THEN 'Not Delivered'
@@ -180,9 +175,6 @@ SELECT
         ELSE 'On Time / Early'
     END AS delivery_status,
 
-    
-    
-    
     CASE
         WHEN o.order_delivered_customer_date IS NOT NULL
              AND o.order_purchase_timestamp IS NOT NULL
@@ -195,10 +187,7 @@ SELECT
             2
         )
     END AS delivery_days,
-
-    
-    
-    
+	
     CASE
         WHEN o.order_delivered_customer_date IS NOT NULL
              AND o.order_estimated_delivery_date IS NOT NULL
@@ -212,9 +201,6 @@ SELECT
         )
     END AS days_vs_estimate,
 
-    
-    
-    
     CASE
         WHEN o.order_delivered_customer_date IS NULL
             THEN 'Not Delivered'
@@ -261,18 +247,31 @@ JOIN deduplicated_reviews r
 -- Delay impact: join eligible deliveries to the latest review by order.
 -- Reuses the exact order-level delay bands and eligibility rather than a second definition.
 CREATE OR REPLACE VIEW vw_delivery_review_impact AS
+	
 WITH bucketed AS (
-    SELECT d.delay_bucket, r.review_score,
-        CASE d.delay_bucket
+    SELECT 
+		d.delay_bucket, 
+		r.review_score,
+        
+		CASE d.delay_bucket
             WHEN 'On Time / Early' THEN 1 WHEN '1-3 Days Late' THEN 2
             WHEN '4-7 Days Late' THEN 3 WHEN '8-14 Days Late' THEN 4 ELSE 5
         END AS delay_bucket_order
-    FROM vw_delivery_performance d
-    JOIN vw_review_performance r ON d.order_id = r.order_id
+    
+	FROM vw_delivery_performance d
+    
+	JOIN vw_review_performance r 
+		ON d.order_id = r.order_id
 )
-SELECT delay_bucket, delay_bucket_order, COUNT(*) AS reviewed_orders,
-    ROUND(AVG(review_score), 2) AS avg_review_score,
+SELECT 
+	delay_bucket, 
+	delay_bucket_order, 
+	COUNT(*) AS reviewed_orders,
+    
+	ROUND(AVG(review_score), 2) AS avg_review_score,
     SUM(review_score <= 2) AS negative_reviews,
     ROUND(100.0 * SUM(review_score <= 2) / COUNT(*), 2) AS negative_review_pct
-FROM bucketed GROUP BY delay_bucket, delay_bucket_order;
+
+FROM bucketed 
+GROUP BY delay_bucket, delay_bucket_order;
 
