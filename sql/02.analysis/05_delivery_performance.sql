@@ -1,5 +1,4 @@
 -- Fulfillment and delivery analysis with shared chronological eligibility and timestamp lateness.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Question: What proportion of all orders is in each status?
 SELECT
@@ -116,7 +115,6 @@ fulfillment_durations AS (
             order_delivered_carrier_date,
             order_delivered_customer_date
         ) / 86400.0 AS shipping_days
-
     FROM valid_deliveries
     WHERE order_status = 'delivered'
       AND order_purchase_timestamp IS NOT NULL
@@ -130,11 +128,9 @@ fulfillment_durations AS (
 )
 SELECT
     COUNT(*) AS valid_delivered_orders,
-
     ROUND(AVG(approval_days), 2) AS avg_approval_days,
     ROUND(AVG(dispatch_days), 2) AS avg_dispatch_days,
     ROUND(AVG(shipping_days), 2) AS avg_shipping_days,
-
     ROUND(
         AVG(approval_days + dispatch_days + shipping_days),
         2
@@ -163,12 +159,13 @@ WITH valid_deliveries AS (
 fulfillment_durations AS (
     SELECT
         order_id,
-
         CASE
-            WHEN TIMESTAMPDIFF(SECOND, order_estimated_delivery_date, order_delivered_customer_date) / 86400.0 <= 0 THEN 'On time'
+            WHEN TIMESTAMPDIFF(
+                SECOND, 
+                order_estimated_delivery_date, order_delivered_customer_date
+                ) / 86400.0 <= 0 THEN 'On time'
             ELSE 'Late'
         END AS delivery_performance,
-
         TIMESTAMPDIFF(
             SECOND,
             order_purchase_timestamp,
@@ -186,7 +183,6 @@ fulfillment_durations AS (
             order_delivered_carrier_date,
             order_delivered_customer_date
         ) / 86400.0 AS shipping_days
-
     FROM valid_deliveries
     WHERE order_status = 'delivered'
       AND order_purchase_timestamp IS NOT NULL
@@ -242,13 +238,13 @@ state_delivery AS (
             o.order_purchase_timestamp,
             o.order_delivered_customer_date
         ) / 86400.0 AS delivery_days,
-
-        TIMESTAMPDIFF(SECOND, o.order_estimated_delivery_date, o.order_delivered_customer_date) / 86400.0 AS days_vs_estimate
-
+        TIMESTAMPDIFF(
+            SECOND, 
+            o.order_estimated_delivery_date, o.order_delivered_customer_date
+            ) / 86400.0 AS days_vs_estimate
     FROM valid_deliveries AS o
     JOIN olist_customers_dataset AS c
         ON o.customer_id = c.customer_id
-
     WHERE o.order_status = 'delivered'
       AND o.order_purchase_timestamp IS NOT NULL
       AND o.order_delivered_customer_date IS NOT NULL
@@ -258,27 +254,22 @@ state_delivery AS (
 SELECT
     customer_state,
     COUNT(*) AS delivered_orders,
-
     ROUND(AVG(delivery_days), 2) AS avg_delivery_days,
-
     SUM(
         CASE WHEN days_vs_estimate > 0 THEN 1 ELSE 0 END
     ) AS late_orders,
-
     ROUND(
         AVG(
             CASE WHEN days_vs_estimate > 0 THEN 1 ELSE 0 END
         ) * 100,
         2
     ) AS late_delivery_pct,
-
     ROUND(
         AVG(
             CASE WHEN days_vs_estimate > 0 THEN days_vs_estimate END
         ),
         2
     ) AS avg_days_late
-
 FROM state_delivery
 GROUP BY customer_state
 ORDER BY late_delivery_pct DESC, delivered_orders DESC;
@@ -287,8 +278,10 @@ ORDER BY late_delivery_pct DESC, delivered_orders DESC;
 -- Month refers to purchase, not delivery; uses the shared eligible delivery population.
 WITH valid_deliveries AS (
     SELECT o.*,
-        TIMESTAMPDIFF(SECOND, o.order_approved_at,
-            o.order_delivered_carrier_date) / 86400.0 AS stage_dispatch_days,
+        TIMESTAMPDIFF(
+            SECOND, 
+            o.order_approved_at, o.order_delivered_carrier_date
+            ) / 86400.0 AS stage_dispatch_days,
         CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
             THEN 1 ELSE 0 END AS is_late
     FROM olist_orders_dataset o
@@ -308,15 +301,15 @@ delivery_metrics AS (
         DATE_FORMAT(
             order_purchase_timestamp, '%Y-%m'
         ) AS purchase_month,
-
         TIMESTAMPDIFF(
             SECOND,
             order_purchase_timestamp,
             order_delivered_customer_date
         ) / 86400.0 AS delivery_days,
-
-        TIMESTAMPDIFF(SECOND, order_estimated_delivery_date, order_delivered_customer_date) / 86400.0 AS days_vs_estimate
-
+        TIMESTAMPDIFF(
+            SECOND, 
+            order_estimated_delivery_date, order_delivered_customer_date)
+            / 86400.0 AS days_vs_estimate
     FROM valid_deliveries
     WHERE order_status = 'delivered'
       AND order_purchase_timestamp IS NOT NULL
@@ -327,27 +320,22 @@ delivery_metrics AS (
 SELECT
     purchase_month,
     COUNT(*) AS delivered_orders,
-
     ROUND(AVG(delivery_days), 2) AS avg_delivery_days,
-
     SUM(
         CASE WHEN days_vs_estimate > 0 THEN 1 ELSE 0 END
     ) AS late_orders,
-
     ROUND(
         AVG(
             CASE WHEN days_vs_estimate > 0 THEN 1 ELSE 0 END
         ) * 100,
         2
     ) AS late_delivery_pct,
-
     ROUND(
         AVG(
             CASE WHEN days_vs_estimate > 0 THEN days_vs_estimate END
         ),
         2
     ) AS avg_days_late
-
 FROM delivery_metrics
 GROUP BY purchase_month
 ORDER BY purchase_month;
@@ -394,7 +382,6 @@ monthly_durations AS (
             order_delivered_carrier_date,
             order_delivered_customer_date
         ) / 86400.0 AS shipping_days
-
     FROM valid_deliveries
     WHERE order_status = 'delivered'
       AND order_purchase_timestamp >= '2018-02-01'
@@ -414,7 +401,6 @@ SELECT
     ROUND(AVG(approval_days), 2) AS avg_approval_days,
     ROUND(AVG(dispatch_days), 2) AS avg_dispatch_days,
     ROUND(AVG(shipping_days), 2) AS avg_shipping_days,
-
     ROUND(
         AVG(approval_days + dispatch_days + shipping_days),
         2
@@ -460,11 +446,8 @@ SELECT
             THEN 'On time / Early'
         ELSE 'Late'
     END AS delivery_status,
-
     r.review_score,
-
     COUNT(*) AS reviews,
-
     ROUND(
         COUNT(*) * 100.0 /
         SUM(COUNT(*)) OVER (
@@ -478,7 +461,6 @@ SELECT
         ),
         2
     ) AS pct_of_reviews
-
 FROM valid_deliveries AS o
 JOIN order_reviews AS r
     ON o.order_id = r.order_id
