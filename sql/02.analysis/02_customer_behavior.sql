@@ -1,8 +1,7 @@
 -- Customer counts, spending and purchase progression using all order statuses.
--- MySQL 8+. See docs/metric_definitions.md for shared definitions.
 
 -- Question: How many people purchased once versus more than once?
--- Use customer_unique_id to link people across order-specific customer_id records. All statuses.
+-- Use customer_unique_id to link people across order-specific customer_id records.
 SELECT
     CASE
         WHEN order_count = 1 THEN 'One-time'
@@ -21,7 +20,7 @@ FROM (
 GROUP BY customer_type;
 
 -- Question: How is customer spending distributed?
--- Includes freight and all statuses; orders without item values contribute zero spending.
+-- Includes freight and all order statuses; orders without item values contribute zero spending.
 SELECT
 	CASE
 		WHEN total_revenue < 100 THEN '<100'
@@ -32,7 +31,6 @@ SELECT
     END AS revenue_segment,
 	COUNT(*) AS customers,
     ROUND(SUM(total_revenue), 2) AS revenue
-    
 FROM (
 	SELECT
 		c.customer_unique_id,
@@ -41,8 +39,7 @@ FROM (
 	JOIN olist_orders_dataset o 
 		ON c.customer_id = o.customer_id
 	LEFT JOIN olist_order_items_dataset oi
-		ON o.order_id = oi.order_id
-	
+		ON o.order_id = oi.order_id	
 	GROUP BY c.customer_unique_id
 ) AS customer_revenue
 GROUP BY revenue_segment
@@ -57,7 +54,7 @@ ORDER BY
 
 -- Question: How do one-time and repeat customers differ in value and frequency?
 -- Combines customer counts, average value, total value, revenue share and order frequency.
--- All statuses; item-plus-freight revenue; distinct orders avoid item multiplication.
+-- All order statuses; item-plus-freight revenue; distinct orders avoid item multiplication.
 WITH customer_summary AS (
 	SELECT
 		c.customer_unique_id,
@@ -67,8 +64,7 @@ WITH customer_summary AS (
 	JOIN olist_orders_dataset o 
 		ON c.customer_id = o.customer_id
 	LEFT JOIN olist_order_items_dataset oi
-		ON o.order_id = oi.order_id
-	
+		ON o.order_id = oi.order_id	
 	GROUP BY c.customer_unique_id		
 )
 SELECT
@@ -85,7 +81,7 @@ FROM customer_summary
 GROUP BY customer_type;
 
 -- Question: How long is the interval between consecutive purchases?
--- All statuses with purchase timestamps; each interval is an observation, not each person.
+-- All order statuses with purchase timestamps; each interval is an observation, not each person.
 -- DATEDIFF measures calendar days. Order ID breaks equal-timestamp ties.
 WITH customer_orders AS (
     SELECT
@@ -98,8 +94,7 @@ WITH customer_orders AS (
     FROM olist_customers_dataset c
     JOIN olist_orders_dataset o
         ON c.customer_id = o.customer_id
-    WHERE o.order_purchase_timestamp IS NOT NULL
-    
+    WHERE o.order_purchase_timestamp IS NOT NULL   
 ),
 purchase_intervals AS (
     SELECT
@@ -119,7 +114,7 @@ SELECT
 FROM purchase_intervals;
 
 -- Question: How long do returning customers take to reach their second purchase?
--- All statuses with timestamps; only customers reaching purchase 2 contribute.
+-- All order statuses with timestamps; only customers reaching purchase 2 contribute.
 WITH customer_orders AS (
     SELECT
         c.customer_unique_id,
@@ -131,8 +126,7 @@ WITH customer_orders AS (
     FROM olist_customers_dataset c
     JOIN olist_orders_dataset o
         ON c.customer_id = o.customer_id
-    WHERE o.order_purchase_timestamp IS NOT NULL
-    
+    WHERE o.order_purchase_timestamp IS NOT NULL    
 ),
 first_second AS (
     SELECT
@@ -166,7 +160,7 @@ FROM first_second
 WHERE second_order IS NOT NULL;
 
 -- Question: What share of customers at purchase N reaches N+1?
--- All statuses with timestamps. Retains the terminal stage with zero next-stage customers.
+-- All order statuses with timestamps. Retains the terminal stage with zero next-stage customers.
 -- This is purchase-stage progression, not monthly cohort retention.
 WITH customer_orders AS (
     SELECT
@@ -179,8 +173,7 @@ WITH customer_orders AS (
     FROM olist_customers_dataset c
     JOIN olist_orders_dataset o
         ON c.customer_id = o.customer_id
-    WHERE o.order_purchase_timestamp IS NOT NULL
-    
+    WHERE o.order_purchase_timestamp IS NOT NULL    
 ),
 purchase_counts AS (
     SELECT
