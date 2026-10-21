@@ -74,8 +74,6 @@ Repeat purchasing, customer segments, cohort retention, and payment-method usage
 | Earlier validated delivery/review comparisons show average scores of approximately **4.29 for on-time/early orders** and **2.57 for late orders**. | Delivery delays are associated with a substantial deterioration in customer satisfaction. Exact results depend on the review and lateness convention used. |
 | Credit cards are used on approximately **76.94%** of paid orders, followed by boleto at **19.90%**. | Credit cards dominate payment usage. Orders can use multiple methods, so usage percentages are not mutually exclusive. |
 
-These are historical dashboard findings, not a claim that every figure has been regenerated from the revised scripts. Product-only revenue, comment records and exploratory fixed-threshold risk comparisons remain explicitly distinct; see [metric definitions](docs/metric_definitions.md).
-
 ## 7. Recommendations
 
 | Priority | Suggested action | Measures to monitor |
@@ -121,6 +119,4 @@ The import SQL preserves the original workflow and is not a complete automated i
 - **Retention window:** Repeat purchasing and cohorts describe activity observed in this dataset. Later cohorts have shorter follow-up periods; unobserved future months must not be treated as zero retention. Endpoint months also have limited sales coverage.
 - **Payment and text analysis:** Payment-method usage can total more than 100% because orders can use several methods. Review-comment themes use overlapping Portuguese keyword/regex rules and are not validated sentiment analysis.
 - **Interpretation:** Findings describe historical associations. They do not establish that delays, sellers, payment choices, or categories caused the observed review outcomes.
-
-See [metric_definitions.md](docs/metric_definitions.md) for revised calculation rules, intentional exploratory differences and refresh requirements.
 
