@@ -93,7 +93,6 @@ These are proposed actions based on historical patterns; their business impact h
 | [sql/02.analysis/](sql/02.analysis/) | Eleven scripts covering sales, customers, cohorts, categories, delivery, satisfaction, payments, sellers, regions, review themes, and cross-dimensional insights |
 | [sql/03.validation/](sql/03.validation/) | Row-count, relationship, and data-coverage checks |
 | [sql/04.views/](sql/04.views/) | Four ordered scripts defining the fourteen Tableau analytical views |
-| [docs/metric_definitions.md](docs/metric_definitions.md) | Calculation definitions, population differences, and interpretation caveats |
 | [dashboards/](dashboards/) | Four dashboard images, a PDF export, and the packaged Tableau workbook |
 
 ## 9. How to reproduce
