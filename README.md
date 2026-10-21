@@ -64,7 +64,7 @@ Repeat purchasing, customer segments, cohort retention, and payment-method usage
 
 ## 6. Key findings
 
-**Dashboard snapshot:** The figures and dashboard files below reflect the earlier validated MySQL import. Revised SQL standardizes review handling, delivery eligibility, seller dispatch and cohort coverage. Rebuild the views and refresh Tableau before presenting the workbook as an output of the revised SQL; seller-risk and delay-impact results can change.
+**Dashboard snapshot:** The figures and dashboard files above reflect the earlier validated MySQL import. Revised SQL standardizes review handling, delivery eligibility, seller dispatch and cohort coverage. Rebuild the views and refresh Tableau before presenting the workbook as an output of the revised SQL; seller-risk and delay-impact results can change.
 
 | Finding | Business interpretation |
 | --- | --- |
