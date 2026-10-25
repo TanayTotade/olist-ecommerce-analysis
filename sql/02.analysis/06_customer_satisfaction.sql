@@ -7,7 +7,8 @@ WITH ranked_reviews AS (
         r.*, 
         ROW_NUMBER() OVER (
             PARTITION BY r.order_id
-            ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+            ORDER BY r.review_answer_timestamp DESC, 
+                     r.review_row_id DESC
         ) AS review_rank
     FROM olist_order_reviews_dataset r
 ),
@@ -36,7 +37,7 @@ WITH ranked_reviews AS (
         ROW_NUMBER() OVER (
             PARTITION BY r.order_id
             ORDER BY r.review_answer_timestamp DESC, 
-                    r.review_row_id DESC
+                     r.review_row_id DESC
         ) AS review_rank
     
     FROM olist_order_reviews_dataset r
@@ -115,18 +116,7 @@ ORDER BY
 -- Uses the common complete, chronological delivery population and full timestamp comparison.
 WITH valid_deliveries AS (
     SELECT 
-        o.*,
-        TIMESTAMPDIFF(
-            SECOND, 
-            o.order_approved_at, o.order_delivered_carrier_date
-        ) / 86400.0 AS stage_dispatch_days,
-        
-        CASE 
-            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 
-            ELSE 0 
-        END AS is_late
-    
+        o.*    
     FROM olist_orders_dataset o
     
     WHERE o.order_status = 'delivered'
