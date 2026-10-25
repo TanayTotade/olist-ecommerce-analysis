@@ -1,5 +1,3 @@
--- Exploratory comment participation and overlapping complaint themes; not validated sentiment analysis.
-
 -- Question: How often do review records contain nonblank comments, and how long are they?
 SELECT
     review_score,
