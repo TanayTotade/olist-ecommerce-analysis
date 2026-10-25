@@ -16,20 +16,29 @@ WITH RECURSIVE customer_orders AS (
     WHERE o.order_purchase_timestamp IS NOT NULL
 ),
 observation_end AS (
-    SELECT MAX(order_month) AS last_month FROM customer_orders
+    SELECT 
+        MAX(order_month) AS last_month 
+    FROM customer_orders
 ),
 customer_first_purchase AS (
-    SELECT customer_unique_id, MIN(order_month) AS cohort_month
+    SELECT 
+        customer_unique_id, 
+        MIN(order_month) AS cohort_month
     FROM customer_orders 
     GROUP BY customer_unique_id
 ),
 cohort_sizes AS (
-    SELECT cohort_month, COUNT(*) AS cohort_customers
+    SELECT 
+        cohort_month, 
+        COUNT(*) AS cohort_customers
     FROM customer_first_purchase 
     GROUP BY cohort_month
 ),
 cohort_months AS (
-    SELECT cohort_month, cohort_month AS activity_month FROM cohort_sizes
+    SELECT 
+        cohort_month, 
+        cohort_month AS activity_month 
+    FROM cohort_sizes
     
     UNION ALL
     
