@@ -18,34 +18,8 @@ ORDER BY total_orders DESC;
 -- Question: How are eligible orders distributed across calendar-day delivery bands?
 -- All delivery queries below require complete, chronological stage dates and an estimate.
 -- The distribution uses DATEDIFF calendar days; elapsed stage averages use fractional days.
-WITH valid_deliveries AS (
-    SELECT o.*,
-        TIMESTAMPDIFF(
-            SECOND, 
-            o.order_approved_at,
-            o.order_delivered_carrier_date
-            ) / 86400.0 AS stage_dispatch_days,
-        
-        CASE 
-            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 
-            ELSE 0 
-        END AS is_late
-    
-    FROM olist_orders_dataset o
-    
-    WHERE o.order_status = 'delivered'
-      AND o.order_purchase_timestamp IS NOT NULL
-      AND o.order_approved_at IS NOT NULL
-      AND o.order_delivered_carrier_date IS NOT NULL
-      AND o.order_delivered_customer_date IS NOT NULL
-      AND o.order_estimated_delivery_date IS NOT NULL
-    
-      AND o.order_approved_at >= o.order_purchase_timestamp
-      AND o.order_delivered_carrier_date >= o.order_approved_at
-      AND o.order_delivered_customer_date >= o.order_delivered_carrier_date
-),
-delivery_times AS (
+
+WITH delivery_times AS (
     SELECT
         order_id,
         
@@ -53,10 +27,11 @@ delivery_times AS (
             order_delivered_customer_date,
             order_purchase_timestamp
         ) AS delivery_days
-    
-    FROM valid_deliveries
+        
+    FROM olist_orders_dataset
     
     WHERE order_status = 'delivered'
+      AND order_purchase_timestamp IS NOT NULL
       AND order_delivered_customer_date IS NOT NULL
       AND order_delivered_customer_date >= order_purchase_timestamp
 ),
@@ -79,18 +54,18 @@ delivery_bands AS (
             WHEN delivery_days <= 30 THEN 4
             ELSE 5
         END AS band_order
+        
     FROM delivery_times
 )
 SELECT
     delivery_band,
-    
     COUNT(*) AS delivered_orders,
     
     ROUND(
         COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (),
         2
-    ) AS pct_of_delivered_orders
-
+    ) AS pct_of_valid_delivered_orders
+    
 FROM delivery_bands
 
 GROUP BY delivery_band, band_order
@@ -101,17 +76,7 @@ ORDER BY band_order;
 -- Seconds / 86400.0 preserves fractional days; all stages share one eligible population.
 WITH valid_deliveries AS (
     SELECT 
-        o.*,
-        TIMESTAMPDIFF(
-            SECOND, 
-            o.order_approved_at, o.order_delivered_carrier_date
-            ) / 86400.0 AS stage_dispatch_days,
-        
-        CASE 
-            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 
-            ELSE 0 
-        END AS is_late
+        o.*
     
     FROM olist_orders_dataset o
     
@@ -149,16 +114,6 @@ fulfillment_durations AS (
         ) / 86400.0 AS shipping_days
     
     FROM valid_deliveries
-    
-    WHERE order_status = 'delivered'
-      AND order_purchase_timestamp IS NOT NULL
-      AND order_approved_at IS NOT NULL
-      AND order_delivered_carrier_date IS NOT NULL
-      AND order_delivered_customer_date IS NOT NULL
-
-      AND order_approved_at >= order_purchase_timestamp
-      AND order_delivered_carrier_date >= order_approved_at
-      AND order_delivered_customer_date >= order_delivered_carrier_date
 )
 SELECT
     COUNT(*) AS valid_delivered_orders,
@@ -177,17 +132,7 @@ FROM fulfillment_durations;
 -- Late means delivery timestamp exceeds estimate; any positive fraction is late.
 WITH valid_deliveries AS (
     SELECT 
-        o.*,
-        TIMESTAMPDIFF(
-            SECOND, 
-            o.order_approved_at, o.order_delivered_carrier_date
-        ) / 86400.0 AS stage_dispatch_days,
-        
-        CASE 
-            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 
-            ELSE 0 
-        END AS is_late
+        o.*
     
     FROM olist_orders_dataset o
     
@@ -207,11 +152,14 @@ fulfillment_durations AS (
         order_id,
         
         CASE
-            WHEN TIMESTAMPDIFF(
+            WHEN 
+				TIMESTAMPDIFF(
                 SECOND, 
-                order_estimated_delivery_date, order_delivered_customer_date
-                ) / 86400.0 <= 0 THEN 'On time'
-            ELSE 'Late'
+                order_estimated_delivery_date, 
+                order_delivered_customer_date
+                ) / 86400.0 <= 0 
+                THEN 'On time'
+				ELSE 'Late'
         END AS delivery_performance,
         
         TIMESTAMPDIFF(
@@ -233,17 +181,6 @@ fulfillment_durations AS (
         ) / 86400.0 AS shipping_days
     
     FROM valid_deliveries
-    
-    WHERE order_status = 'delivered'
-      AND order_purchase_timestamp IS NOT NULL
-      AND order_approved_at IS NOT NULL
-      AND order_delivered_carrier_date IS NOT NULL
-      AND order_delivered_customer_date IS NOT NULL
-      AND order_estimated_delivery_date IS NOT NULL
-
-      AND order_approved_at >= order_purchase_timestamp
-      AND order_delivered_carrier_date >= order_approved_at
-      AND order_delivered_customer_date >= order_delivered_carrier_date
 )
 SELECT
     delivery_performance,
@@ -261,24 +198,16 @@ SELECT
 FROM fulfillment_durations
 
 GROUP BY delivery_performance
-ORDER BY CASE delivery_performance WHEN 'On time' THEN 1 ELSE 2 END;
+ORDER BY CASE delivery_performance 
+			WHEN 'On time' 
+            THEN 1 
+            ELSE 2 
+		END;
 
 -- Question: How do speed and lateness vary by customer state?
 -- Lateness uses fractional days; avg_days_late includes only late orders.
 WITH valid_deliveries AS (
-    SELECT 
-        o.*,
-        TIMESTAMPDIFF(
-            SECOND, 
-            o.order_approved_at, o.order_delivered_carrier_date
-        ) / 86400.0 AS stage_dispatch_days,
-        
-        CASE 
-            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 
-            ELSE 0 
-        END AS is_late
-    
+    SELECT o.*
     FROM olist_orders_dataset o
     
     WHERE o.order_status = 'delivered'
@@ -312,12 +241,6 @@ state_delivery AS (
     
     JOIN olist_customers_dataset AS c
         ON o.customer_id = c.customer_id
-    
-    WHERE o.order_status = 'delivered'
-      AND o.order_purchase_timestamp IS NOT NULL
-      AND o.order_delivered_customer_date IS NOT NULL
-      AND o.order_estimated_delivery_date IS NOT NULL
-      AND o.order_delivered_customer_date >= o.order_purchase_timestamp
 )
 SELECT
     customer_state,
@@ -351,19 +274,7 @@ ORDER BY late_delivery_pct DESC, delivered_orders DESC;
 -- Question: How does delivery performance vary by purchase month?
 -- Month refers to purchase, not delivery; uses the shared eligible delivery population.
 WITH valid_deliveries AS (
-    SELECT 
-        o.*,
-        TIMESTAMPDIFF(
-            SECOND, 
-            o.order_approved_at, o.order_delivered_carrier_date
-            ) / 86400.0 AS stage_dispatch_days,
-        
-        CASE 
-            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 
-            ELSE 0 
-        END AS is_late
-    
+    SELECT o.*
     FROM olist_orders_dataset o
     
     WHERE o.order_status = 'delivered'
@@ -397,12 +308,6 @@ delivery_metrics AS (
             / 86400.0 AS days_vs_estimate
     
     FROM valid_deliveries
-    
-    WHERE order_status = 'delivered'
-      AND order_purchase_timestamp IS NOT NULL
-      AND order_delivered_customer_date IS NOT NULL
-      AND order_estimated_delivery_date IS NOT NULL
-      AND order_delivered_customer_date >= order_purchase_timestamp
 )
 SELECT
     purchase_month,
@@ -437,19 +342,7 @@ ORDER BY purchase_month;
 -- Question: How do stages compare for purchases in February-June 2018?
 -- Retained as a focused supporting window; it does not represent the full dataset period.
 WITH valid_deliveries AS (
-    SELECT 
-        o.*,
-        TIMESTAMPDIFF(
-            SECOND, 
-            o.order_approved_at, o.order_delivered_carrier_date
-        ) / 86400.0 AS stage_dispatch_days,
-        
-        CASE 
-            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 
-            ELSE 0 
-        END AS is_late
-    
+    SELECT o.* 
     FROM olist_orders_dataset o
     
     WHERE o.order_status = 'delivered'
@@ -492,14 +385,6 @@ monthly_durations AS (
     WHERE order_status = 'delivered'
       AND order_purchase_timestamp >= '2018-02-01'
       AND order_purchase_timestamp < '2018-07-01'
-
-      AND order_approved_at IS NOT NULL
-      AND order_delivered_carrier_date IS NOT NULL
-      AND order_delivered_customer_date IS NOT NULL
-
-      AND order_approved_at >= order_purchase_timestamp
-      AND order_delivered_carrier_date >= order_approved_at
-      AND order_delivered_customer_date >= order_delivered_carrier_date
 )
 SELECT
     purchase_month,
@@ -525,7 +410,8 @@ WITH ranked_reviews AS (
         r.*, 
         ROW_NUMBER() OVER (
             PARTITION BY r.order_id
-            ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+            ORDER BY r.review_answer_timestamp DESC, 
+                     r.review_row_id DESC
         ) AS review_rank
     
     FROM olist_order_reviews_dataset r
@@ -535,18 +421,7 @@ order_reviews AS (
 ),
 valid_deliveries AS (
     SELECT 
-        o.*,
-        TIMESTAMPDIFF(
-            SECOND, 
-            o.order_approved_at, o.order_delivered_carrier_date
-        ) / 86400.0 AS stage_dispatch_days,
-        
-        CASE 
-            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 
-            ELSE 0 
-        END AS is_late
-    
+        o.*
     FROM olist_orders_dataset o
     
     WHERE o.order_status = 'delivered'
