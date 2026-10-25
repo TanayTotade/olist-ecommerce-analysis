@@ -1,5 +1,3 @@
--- Exploratory on-time complaint risk comparisons at unique reviewed-order grain.
-
 -- Question: Does negative feedback persist for sellers even when delivery is on time?
 -- Single-seller eligible deliveries; one latest review per order.
 -- Risk: 50+ on-time reviewed orders and at least 15% negative; exclude insufficient history.
@@ -13,8 +11,11 @@ WITH valid_deliveries AS (
             o.order_approved_at, o.order_delivered_carrier_date
         ) / 86400.0 AS stage_dispatch_days,
     
-        CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 ELSE 0 END AS is_late
+        CASE 
+            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+                THEN 1 
+            ELSE 0 
+        END AS is_late
     
     FROM olist_orders_dataset o
     WHERE o.order_status = 'delivered'
