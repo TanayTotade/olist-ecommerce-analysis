@@ -47,8 +47,7 @@ ORDER BY payment_value DESC;
 WITH credit_card_orders AS (
     SELECT 
         order_id, 
-        MAX(payment_installments) AS payment_installments,
-        SUM(payment_value) AS payment_value
+        MAX(payment_installments) AS payment_installments
     
     FROM olist_order_payments_dataset
     
@@ -82,12 +81,18 @@ WITH credit_card_orders AS (
 )
 SELECT
     CASE
-        WHEN payment_installments IS NULL OR payment_installments <= 0 THEN 'Unknown / invalid'
-        WHEN payment_installments = 1 THEN 'Single payment'
-        WHEN payment_installments BETWEEN 2 AND 3 THEN 'Short-term (2-3)'
-        WHEN payment_installments BETWEEN 4 AND 6 THEN 'Medium-term (4-6)'
-        WHEN payment_installments BETWEEN 7 AND 12 THEN 'Long-term (7-12)'
-        WHEN payment_installments >= 13 THEN 'Extended (13+)'
+        WHEN payment_installments IS NULL OR payment_installments <= 0 
+			THEN 'Unknown / invalid'
+        WHEN payment_installments = 1 
+			THEN 'Single payment'
+        WHEN payment_installments BETWEEN 2 AND 3 
+			THEN 'Short-term (2-3)'
+        WHEN payment_installments BETWEEN 4 AND 6 
+			THEN 'Medium-term (4-6)'
+        WHEN payment_installments BETWEEN 7 AND 12 
+			THEN 'Long-term (7-12)'
+        WHEN payment_installments >= 13 
+			THEN 'Extended (13+)'
     END AS installment_group,
     
     COUNT(DISTINCT order_id) AS orders,
@@ -341,7 +346,8 @@ WITH ranked_reviews AS (
         r.*, 
         ROW_NUMBER() OVER (
             PARTITION BY r.order_id
-            ORDER BY r.review_answer_timestamp DESC, r.review_row_id DESC
+            ORDER BY r.review_answer_timestamp DESC, 
+                     r.review_row_id DESC
         ) AS review_rank
     
     FROM olist_order_reviews_dataset r
@@ -395,18 +401,7 @@ ORDER BY avg_review_score DESC;
 -- Mixed-method orders contribute once to each method; lateness compares full timestamps.
 WITH valid_deliveries AS (
     SELECT 
-        o.*,
-        TIMESTAMPDIFF(
-            SECOND, 
-            o.order_approved_at, o.order_delivered_carrier_date
-            ) / 86400.0 AS stage_dispatch_days,
-        
-        CASE 
-            WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
-            THEN 1 
-            ELSE 0 
-        END AS is_late
-    
+        o.*
     FROM olist_orders_dataset o
     
     WHERE o.order_status = 'delivered'
@@ -460,11 +455,6 @@ FROM order_payment_method p
 
 JOIN valid_deliveries o
     ON p.order_id = o.order_id
-
-WHERE o.order_status = 'delivered'
-    AND o.order_purchase_timestamp IS NOT NULL
-    AND o.order_delivered_customer_date IS NOT NULL
-    AND o.order_estimated_delivery_date IS NOT NULL
 
 GROUP BY p.payment_type
 ORDER BY avg_delivery_days;
